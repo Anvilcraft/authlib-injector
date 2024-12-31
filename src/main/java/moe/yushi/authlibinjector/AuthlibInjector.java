@@ -51,6 +51,8 @@ import moe.yushi.authlibinjector.httpd.QueryProfileFilter;
 import moe.yushi.authlibinjector.httpd.QueryUUIDsFilter;
 import moe.yushi.authlibinjector.httpd.URLFilter;
 import moe.yushi.authlibinjector.httpd.URLProcessor;
+import moe.yushi.authlibinjector.login.CacheManager;
+import moe.yushi.authlibinjector.login.LoginArgumentsInjector;
 import moe.yushi.authlibinjector.transform.ClassTransformer;
 import moe.yushi.authlibinjector.transform.DumpClassListener;
 import moe.yushi.authlibinjector.transform.support.AccountTypeTransformer;
@@ -68,6 +70,7 @@ import moe.yushi.authlibinjector.transform.support.PaperUsernameCheckTransformer
 import moe.yushi.authlibinjector.transform.support.ProxyParameterWorkaround;
 import moe.yushi.authlibinjector.transform.support.SkinWhitelistTransformUnit;
 import moe.yushi.authlibinjector.transform.support.UsernameCharacterCheckTransformer;
+import moe.yushi.authlibinjector.transform.support.UsernameLengthTransformer;
 import moe.yushi.authlibinjector.transform.support.VelocityProfileKeyTransformUnit;
 import moe.yushi.authlibinjector.transform.support.YggdrasilKeyTransformUnit;
 import moe.yushi.authlibinjector.yggdrasil.CustomYggdrasilAPIProvider;
@@ -90,6 +93,7 @@ public final class AuthlibInjector {
 		booted = true;
 		AuthlibInjector.instrumentation = requireNonNull(instrumentation);
 		Config.init();
+        CacheManager.INSTANCE.createCache();
 
 		retransformSupported = instrumentation.isRetransformClassesSupported();
 		if (!retransformSupported) {
@@ -282,6 +286,7 @@ public final class AuthlibInjector {
 		transformer.units.add(new ConstantURLTransformUnit(urlProcessor));
 		transformer.units.add(new CitizensTransformer());
 		transformer.units.add(new ConcatenateURLTransformUnit());
+        transformer.units.add(new UsernameLengthTransformer());
 
 		boolean usernameCheckDefault = Boolean.TRUE.equals(config.getMeta().get("feature.username_check"));
 		if (Config.usernameCheck.isEnabled(usernameCheckDefault)) {
@@ -300,6 +305,7 @@ public final class AuthlibInjector {
 		transformer.units.add(new VelocityProfileKeyTransformUnit());
 		transformer.units.add(new BungeeCordProfileKeyTransformUnit());
 		MainArgumentsTransformer.getArgumentsListeners().add(new AccountTypeTransformer()::transform);
+        MainArgumentsTransformer.getArgumentsListeners().add(new LoginArgumentsInjector());
 
 		return transformer;
 	}

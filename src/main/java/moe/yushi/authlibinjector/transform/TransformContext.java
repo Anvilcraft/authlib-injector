@@ -25,6 +25,8 @@ public interface TransformContext {
 
 	String getClassName();
 
+    String getSuperName();
+
 	boolean isInterface();
 
 	void markModified();

@@ -71,6 +71,11 @@ public class ClassTransformer implements ClassFileTransformer {
 				return className;
 			}
 
+            @Override
+            public String getSuperName() {
+                return TransformHandle.this.getClassReader().getSuperName();
+            }
+
 			@Override
 			public boolean isInterface() {
 				return TransformHandle.this.isInterface();
