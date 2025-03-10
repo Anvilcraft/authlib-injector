@@ -29,145 +29,166 @@ import org.junit.jupiter.api.Test;
 
 @SuppressWarnings("resource")
 public class ChunkedInputStreamTest {
+    @Test
+    public void testRead1() throws IOException {
+        byte[] data = ("4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n")
+                          .getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertArrayEquals(
+            ("Wikipedia in\r\n\r\nchunks.").getBytes(US_ASCII), asBytes(in)
+        );
+        assertEquals(underlying.read(), -1);
+    }
 
-	@Test
-	public void testRead1() throws IOException {
-		byte[] data = ("4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertArrayEquals(("Wikipedia in\r\n\r\nchunks.").getBytes(US_ASCII), asBytes(in));
-		assertEquals(underlying.read(), -1);
-	}
+    @Test
+    public void testRead2() throws IOException {
+        byte[] data = ("4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n.")
+                          .getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertArrayEquals(
+            ("Wikipedia in\r\n\r\nchunks.").getBytes(US_ASCII), asBytes(in)
+        );
+        assertEquals(underlying.read(), '.');
+    }
 
-	@Test
-	public void testRead2() throws IOException {
-		byte[] data = ("4\r\nWiki\r\n5\r\npedia\r\ne\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n.").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertArrayEquals(("Wikipedia in\r\n\r\nchunks.").getBytes(US_ASCII), asBytes(in));
-		assertEquals(underlying.read(), '.');
-	}
+    @Test
+    public void testRead3() throws IOException {
+        byte[] data
+            = ("25\r\nThis is the data in the first chunk\r\n\r\n1c\r\nand this is the "
+               + "second one\r\n\r\n3\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n")
+                  .getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertArrayEquals(
+            ("This is the data in the first chunk\r\nand this is the second "
+             + "one\r\nconsequence")
+                .getBytes(US_ASCII),
+            asBytes(in)
+        );
+        assertEquals(underlying.read(), -1);
+    }
 
-	@Test
-	public void testRead3() throws IOException {
-		byte[] data = ("25\r\nThis is the data in the first chunk\r\n\r\n1c\r\nand this is the second one\r\n\r\n3\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertArrayEquals(("This is the data in the first chunk\r\nand this is the second one\r\nconsequence").getBytes(US_ASCII), asBytes(in));
-		assertEquals(underlying.read(), -1);
-	}
+    @Test
+    public void testRead4() throws IOException {
+        byte[] data
+            = ("25\r\nThis is the data in the first chunk\r\n\r\n1C\r\nand this is the "
+               + "second one\r\n\r\n3\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n.")
+                  .getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertArrayEquals(
+            ("This is the data in the first chunk\r\nand this is the second "
+             + "one\r\nconsequence")
+                .getBytes(US_ASCII),
+            asBytes(in)
+        );
+        assertEquals(underlying.read(), '.');
+    }
 
-	@Test
-	public void testRead4() throws IOException {
-		byte[] data = ("25\r\nThis is the data in the first chunk\r\n\r\n1C\r\nand this is the second one\r\n\r\n3\r\ncon\r\n8\r\nsequence\r\n0\r\n\r\n.").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertArrayEquals(("This is the data in the first chunk\r\nand this is the second one\r\nconsequence").getBytes(US_ASCII), asBytes(in));
-		assertEquals(underlying.read(), '.');
-	}
+    @Test
+    public void testRead5() throws IOException {
+        byte[] data = ("0\r\n\r\n").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertArrayEquals(new byte[0], asBytes(in));
+        assertEquals(underlying.read(), -1);
+    }
 
-	@Test
-	public void testRead5() throws IOException {
-		byte[] data = ("0\r\n\r\n").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertArrayEquals(new byte[0], asBytes(in));
-		assertEquals(underlying.read(), -1);
-	}
+    @Test
+    public void testReadEOF1() throws IOException {
+        byte[] data = ("a").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF1() throws IOException {
-		byte[] data = ("a").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF2() throws IOException {
+        byte[] data = ("a\r").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF2() throws IOException {
-		byte[] data = ("a\r").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF3() throws IOException {
+        byte[] data = ("a\r\n").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF3() throws IOException {
-		byte[] data = ("a\r\n").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF4() throws IOException {
+        byte[] data = ("a\r\nabc").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF4() throws IOException {
-		byte[] data = ("a\r\nabc").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF5() throws IOException {
+        byte[] data = ("a\r\n123456789a\r").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF5() throws IOException {
-		byte[] data = ("a\r\n123456789a\r").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF6() throws IOException {
+        byte[] data = ("a\r\n123456789a\r\n").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF6() throws IOException {
-		byte[] data = ("a\r\n123456789a\r\n").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testReadEOF7() throws IOException {
+        byte[] data = ("a\r\n123456789a\r\n0\r\n\r").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(EOFException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testReadEOF7() throws IOException {
-		byte[] data = ("a\r\n123456789a\r\n0\r\n\r").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(EOFException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testBadIn1() throws IOException {
+        byte[] data = ("-1").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(IOException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testBadIn1() throws IOException {
-		byte[] data = ("-1").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(IOException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testBadIn2() throws IOException {
+        byte[] data = ("a\ra").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(IOException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testBadIn2() throws IOException {
-		byte[] data = ("a\ra").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(IOException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testBadIn3() throws IOException {
+        byte[] data = ("a\r\n123456789aa").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(IOException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testBadIn3() throws IOException {
-		byte[] data = ("a\r\n123456789aa").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(IOException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testBadIn4() throws IOException {
+        byte[] data = ("a\r\n123456789a\ra").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(IOException.class, () -> asBytes(in));
+    }
 
-	@Test
-	public void testBadIn4() throws IOException {
-		byte[] data = ("a\r\n123456789a\ra").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(IOException.class, () -> asBytes(in));
-	}
-
-	@Test
-	public void testBadIn5() throws IOException {
-		byte[] data = ("a\r\n123456789a\r\n0\r\n\r-").getBytes(US_ASCII);
-		ByteArrayInputStream underlying = new ByteArrayInputStream(data);
-		InputStream in = new ChunkedInputStream(underlying);
-		assertThrows(IOException.class, () -> asBytes(in));
-	}
+    @Test
+    public void testBadIn5() throws IOException {
+        byte[] data = ("a\r\n123456789a\r\n0\r\n\r-").getBytes(US_ASCII);
+        ByteArrayInputStream underlying = new ByteArrayInputStream(data);
+        InputStream in = new ChunkedInputStream(underlying);
+        assertThrows(IOException.class, () -> asBytes(in));
+    }
 }

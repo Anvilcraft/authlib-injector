@@ -46,184 +46,225 @@ import moe.yushi.authlibinjector.util.Logging;
 import moe.yushi.authlibinjector.util.Logging.Level;
 
 public class YggdrasilKeyTransformUnit implements TransformUnit {
+    public static final List<PublicKey> PUBLIC_KEYS = new CopyOnWriteArrayList<>();
 
-	public static final List<PublicKey> PUBLIC_KEYS = new CopyOnWriteArrayList<>();
+    static {
+        PUBLIC_KEYS.add(loadMojangPublicKey());
+    }
 
-	static {
-		PUBLIC_KEYS.add(loadMojangPublicKey());
-	}
+    private static PublicKey loadMojangPublicKey() {
+        try (
+            InputStream in
+            = YggdrasilKeyTransformUnit.class.getResourceAsStream("/mojang_publickey.der")
+        ) {
+            return KeyUtils.parseX509PublicKey(asBytes(in));
+        } catch (GeneralSecurityException | IOException e) {
+            throw new RuntimeException("Failed to load Mojang public key", e);
+        }
+    }
 
-	private static PublicKey loadMojangPublicKey() {
-		try (InputStream in = YggdrasilKeyTransformUnit.class.getResourceAsStream("/mojang_publickey.der")) {
-			return KeyUtils.parseX509PublicKey(asBytes(in));
-		} catch (GeneralSecurityException | IOException e) {
-			throw new RuntimeException("Failed to load Mojang public key", e);
-		}
-	}
+    @CallbackMethod
+    public static boolean verifyPropertySignature(Object propertyObj) {
+        String base64Signature;
+        String propertyValue;
 
-	@CallbackMethod
-	public static boolean verifyPropertySignature(Object propertyObj) {
-		String base64Signature;
-		String propertyValue;
+        try {
+            MethodHandle valueHandle;
+            try {
+                valueHandle = publicLookup().findVirtual(
+                    propertyObj.getClass(), "getValue", methodType(String.class)
+                );
+            } catch (NoSuchMethodException ignored) {
+                valueHandle = publicLookup().findVirtual(
+                    propertyObj.getClass(), "value", methodType(String.class)
+                );
+            }
 
-		try {
-			MethodHandle valueHandle;
-			try {
-				valueHandle = publicLookup().findVirtual(propertyObj.getClass(), "getValue", methodType(String.class));
-			} catch (NoSuchMethodException ignored) {
-				valueHandle = publicLookup().findVirtual(propertyObj.getClass(), "value", methodType(String.class));
-			}
+            MethodHandle signatureHandle;
+            try {
+                signatureHandle = publicLookup().findVirtual(
+                    propertyObj.getClass(), "getSignature", methodType(String.class)
+                );
+            } catch (NoSuchMethodException ignored) {
+                signatureHandle = publicLookup().findVirtual(
+                    propertyObj.getClass(), "signature", methodType(String.class)
+                );
+            }
 
-			MethodHandle signatureHandle;
-			try {
-				signatureHandle = publicLookup().findVirtual(propertyObj.getClass(), "getSignature", methodType(String.class));
-			} catch(NoSuchMethodException ignored) {
-				signatureHandle = publicLookup().findVirtual(propertyObj.getClass(), "signature", methodType(String.class));
-			}
+            base64Signature = (String) signatureHandle.invokeWithArguments(propertyObj);
+            propertyValue = (String) valueHandle.invokeWithArguments(propertyObj);
+        } catch (Throwable e) {
+            Logging.log(Level.ERROR, "Failed to get property attributes", e);
+            return false;
+        }
 
-			base64Signature = (String) signatureHandle.invokeWithArguments(propertyObj);
-			propertyValue = (String) valueHandle.invokeWithArguments(propertyObj);
-		} catch (Throwable e) {
-			Logging.log(Level.ERROR, "Failed to get property attributes", e);
-			return false;
-		}
+        byte[] sig = Base64.getDecoder().decode(base64Signature);
+        byte[] data = propertyValue.getBytes();
 
-		byte[] sig = Base64.getDecoder().decode(base64Signature);
-		byte[] data = propertyValue.getBytes();
+        for (PublicKey customKey : PUBLIC_KEYS) {
+            try {
+                Signature signature = Signature.getInstance("SHA1withRSA");
+                signature.initVerify(customKey);
+                signature.update(data);
+                if (signature.verify(sig))
+                    return true;
+            } catch (GeneralSecurityException e) {
+                Logging.log(DEBUG, "Failed to verify signature with key " + customKey, e);
+            }
+        }
 
-		for (PublicKey customKey : PUBLIC_KEYS) {
-			try {
-				Signature signature = Signature.getInstance("SHA1withRSA");
-				signature.initVerify(customKey);
-				signature.update(data);
-				if (signature.verify(sig))
-					return true;
-			} catch (GeneralSecurityException e) {
-				Logging.log(DEBUG, "Failed to verify signature with key " + customKey, e);
-			}
-		}
+        Logging.log(Level.WARNING, "Failed to verify property signature");
+        return false;
+    }
 
-		Logging.log(Level.WARNING, "Failed to verify property signature");
-		return false;
-	}
+    @CallbackMethod
+    public static Signature createDummySignature() {
+        Signature sig = new Signature("authlib-injector-dummy-verify") {
+            @Override
+            protected boolean engineVerify(byte[] sigBytes) {
+                return true;
+            }
 
-	@CallbackMethod
-	public static Signature createDummySignature() {
-		Signature sig = new Signature("authlib-injector-dummy-verify") {
+            @Override
+            protected void engineUpdate(byte[] b, int off, int len) {}
 
-			@Override
-			protected boolean engineVerify(byte[] sigBytes) {
-				return true;
-			}
+            @Override
+            protected void engineUpdate(byte b) {}
 
-			@Override
-			protected void engineUpdate(byte[] b, int off, int len) {
+            @Override
+            protected byte[] engineSign() {
+                throw new UnsupportedOperationException();
+            }
 
-			}
+            @Override
+            @Deprecated
+            protected void engineSetParameter(String param, Object value) {}
 
-			@Override
-			protected void engineUpdate(byte b) {
-			}
+            @Override
+            protected void engineInitVerify(PublicKey publicKey) {}
 
-			@Override
-			protected byte[] engineSign() {
-				throw new UnsupportedOperationException();
-			}
+            @Override
+            protected void engineInitSign(PrivateKey privateKey) {
+                throw new UnsupportedOperationException();
+            }
 
-			@Override
-			@Deprecated
-			protected void engineSetParameter(String param, Object value) {
+            @Override
+            @Deprecated
+            protected Object engineGetParameter(String param) {
+                return null;
+            }
+        };
+        try {
+            sig.initVerify((PublicKey) null);
+        } catch (InvalidKeyException e) {
+            throw new RuntimeException(e);
+        }
+        return sig;
+    }
 
-			}
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        if ("com.mojang.authlib.properties.Property".equals(className)) {
+            return Optional.of(new ClassVisitor(ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String desc,
+                    String signature,
+                    String[] exceptions
+                ) {
+                    if ("isSignatureValid".equals(name)
+                        && "(Ljava/security/PublicKey;)Z".equals(desc)) {
+                        ctx.markModified();
 
-			@Override
-			protected void engineInitVerify(PublicKey publicKey) {
-			}
+                        MethodVisitor mv = super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                        mv.visitCode();
+                        mv.visitVarInsn(ALOAD, 0);
+                        ctx.invokeCallback(
+                            mv, YggdrasilKeyTransformUnit.class, "verifyPropertySignature"
+                        );
+                        mv.visitInsn(IRETURN);
+                        mv.visitMaxs(-1, -1);
+                        mv.visitEnd();
 
-			@Override
-			protected void engineInitSign(PrivateKey privateKey) {
-				throw new UnsupportedOperationException();
-			}
+                        return null;
+                    } else {
+                        return super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                    }
+                }
+            });
 
-			@Override
-			@Deprecated
-			protected Object engineGetParameter(String param) {
-				return null;
-			}
-		};
-		try {
-			sig.initVerify((PublicKey) null);
-		} catch (InvalidKeyException e) {
-			throw new RuntimeException(e);
-		}
-		return sig;
-	}
+        } else if ("com.mojang.authlib.yggdrasil.YggdrasilServicesKeyInfo".equals(
+                       className
+                   )) {
+            return Optional.of(new ClassVisitor(ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String desc,
+                    String signature,
+                    String[] exceptions
+                ) {
+                    if ("validateProperty".equals(name)
+                        && "(Lcom/mojang/authlib/properties/Property;)Z".equals(desc)) {
+                        ctx.markModified();
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		if ("com.mojang.authlib.properties.Property".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-					if ("isSignatureValid".equals(name) && "(Ljava/security/PublicKey;)Z".equals(desc)) {
-						ctx.markModified();
+                        MethodVisitor mv = super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                        mv.visitCode();
+                        mv.visitVarInsn(ALOAD, 1);
+                        ctx.invokeCallback(
+                            mv, YggdrasilKeyTransformUnit.class, "verifyPropertySignature"
+                        );
+                        mv.visitInsn(IRETURN);
+                        mv.visitMaxs(-1, -1);
+                        mv.visitEnd();
 
-						MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
-						mv.visitCode();
-						mv.visitVarInsn(ALOAD, 0);
-						ctx.invokeCallback(mv, YggdrasilKeyTransformUnit.class, "verifyPropertySignature");
-						mv.visitInsn(IRETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
+                        return null;
 
-						return null;
-					} else {
-						return super.visitMethod(access, name, desc, signature, exceptions);
-					}
-				}
-			});
+                    } else if ("signature".equals(name)
+                               && "()Ljava/security/Signature;".equals(desc)) {
+                        ctx.markModified();
 
-		} else if ("com.mojang.authlib.yggdrasil.YggdrasilServicesKeyInfo".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-					if ("validateProperty".equals(name) && "(Lcom/mojang/authlib/properties/Property;)Z".equals(desc)) {
-						ctx.markModified();
+                        MethodVisitor mv = super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                        mv.visitCode();
+                        ctx.invokeCallback(
+                            mv, YggdrasilKeyTransformUnit.class, "createDummySignature"
+                        );
+                        mv.visitInsn(ARETURN);
+                        mv.visitMaxs(-1, -1);
+                        mv.visitEnd();
 
-						MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
-						mv.visitCode();
-						mv.visitVarInsn(ALOAD, 1);
-						ctx.invokeCallback(mv, YggdrasilKeyTransformUnit.class, "verifyPropertySignature");
-						mv.visitInsn(IRETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
+                        return null;
 
-						return null;
+                    } else {
+                        return super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                    }
+                }
+            });
+        } else {
+            return Optional.empty();
+        }
+    }
 
-					} else if ("signature".equals(name) && "()Ljava/security/Signature;".equals(desc)) {
-						ctx.markModified();
-
-						MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
-						mv.visitCode();
-						ctx.invokeCallback(mv, YggdrasilKeyTransformUnit.class, "createDummySignature");
-						mv.visitInsn(ARETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
-
-						return null;
-
-					} else {
-						return super.visitMethod(access, name, desc, signature, exceptions);
-					}
-				}
-			});
-		} else {
-			return Optional.empty();
-		}
-	}
-
-	@Override
-	public String toString() {
-		return "Yggdrasil Public Key Transformer";
-	}
+    @Override
+    public String toString() {
+        return "Yggdrasil Public Key Transformer";
+    }
 }

@@ -47,8 +47,7 @@
 package moe.yushi.authlibinjector.internal.fi.iki.elonen;
 
 public interface IStatus {
+    String getDescription();
 
-	String getDescription();
-
-	int getRequestStatus();
+    int getRequestStatus();
 }

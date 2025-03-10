@@ -23,36 +23,37 @@ import static moe.yushi.authlibinjector.util.Logging.Level.INFO;
 import java.lang.instrument.Instrumentation;
 
 public final class Premain {
-	private Premain() {}
+    private Premain() {}
 
-	public static void premain(String arg, Instrumentation instrumentation) {
-		try {
-			initInjector(arg, instrumentation, false);
-		} catch (InitializationException e) {
-			log(DEBUG, "A known exception has occurred", e);
-			System.exit(1);
-		} catch (Throwable e) {
-			log(ERROR, "An exception has occurred, exiting", e);
-			System.exit(1);
-		}
-	}
+    public static void premain(String arg, Instrumentation instrumentation) {
+        try {
+            initInjector(arg, instrumentation, false);
+        } catch (InitializationException e) {
+            log(DEBUG, "A known exception has occurred", e);
+            System.exit(1);
+        } catch (Throwable e) {
+            log(ERROR, "An exception has occurred, exiting", e);
+            System.exit(1);
+        }
+    }
 
-	public static void agentmain(String arg, Instrumentation instrumentation) {
-		try {
-			log(INFO, "Launched from agentmain");
-			initInjector(arg, instrumentation, true);
-		} catch (InitializationException e) {
-			log(DEBUG, "A known exception has occurred", e);
-		} catch (Throwable e) {
-			log(ERROR, "An exception has occurred", e);
-		}
-	}
+    public static void agentmain(String arg, Instrumentation instrumentation) {
+        try {
+            log(INFO, "Launched from agentmain");
+            initInjector(arg, instrumentation, true);
+        } catch (InitializationException e) {
+            log(DEBUG, "A known exception has occurred", e);
+        } catch (Throwable e) {
+            log(ERROR, "An exception has occurred", e);
+        }
+    }
 
-	private static void initInjector(String arg, Instrumentation instrumentation, boolean retransform) {
-		AuthlibInjector.bootstrap(instrumentation, arg);
+    private static void
+    initInjector(String arg, Instrumentation instrumentation, boolean retransform) {
+        AuthlibInjector.bootstrap(instrumentation, arg);
 
-		if (retransform) {
-			AuthlibInjector.retransformAllClasses();
-		}
-	}
+        if (retransform) {
+            AuthlibInjector.retransformAllClasses();
+        }
+    }
 }

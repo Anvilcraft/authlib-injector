@@ -71,249 +71,270 @@ import java.util.TimeZone;
  * HTTP response. Return one of these from serve().
  */
 public class Response implements Closeable {
+    /**
+     * HTTP status code after processing, e.g. "200 OK", Status.OK
+     */
+    private IStatus status;
 
-	/**
-	 * HTTP status code after processing, e.g. "200 OK", Status.OK
-	 */
-	private IStatus status;
+    /**
+     * MIME type of content, e.g. "text/html"
+     */
+    private String mimeType;
 
-	/**
-	 * MIME type of content, e.g. "text/html"
-	 */
-	private String mimeType;
+    /**
+     * Data of the response, may be null.
+     */
+    private InputStream data;
 
-	/**
-	 * Data of the response, may be null.
-	 */
-	private InputStream data;
+    private long contentLength;
 
-	private long contentLength;
+    /**
+     * Headers for the HTTP response. Use addHeader() to add lines.
+     */
+    private final Map<String, String> headers = new LinkedHashMap<>();
 
-	/**
-	 * Headers for the HTTP response. Use addHeader() to add lines.
-	 */
-	private final Map<String, String> headers = new LinkedHashMap<>();
+    /**
+     * The request method that spawned this response.
+     */
+    private String requestMethod;
 
-	/**
-	 * The request method that spawned this response.
-	 */
-	private String requestMethod;
+    /**
+     * Use chunkedTransfer
+     */
+    private boolean chunkedTransfer;
 
-	/**
-	 * Use chunkedTransfer
-	 */
-	private boolean chunkedTransfer;
+    private boolean keepAlive;
 
-	private boolean keepAlive;
+    /**
+     * Creates a fixed length response if totalBytes>=0, otherwise chunked.
+     */
+    protected Response(
+        IStatus status, String mimeType, InputStream data, long totalBytes
+    ) {
+        this.status = status;
+        this.mimeType = mimeType;
+        if (data == null) {
+            this.data = new ByteArrayInputStream(new byte[0]);
+            this.contentLength = 0L;
+        } else {
+            this.data = data;
+            this.contentLength = totalBytes;
+        }
+        this.chunkedTransfer = this.contentLength < 0;
+        keepAlive = true;
+    }
 
-	/**
-	 * Creates a fixed length response if totalBytes>=0, otherwise chunked.
-	 */
-	protected Response(IStatus status, String mimeType, InputStream data, long totalBytes) {
-		this.status = status;
-		this.mimeType = mimeType;
-		if (data == null) {
-			this.data = new ByteArrayInputStream(new byte[0]);
-			this.contentLength = 0L;
-		} else {
-			this.data = data;
-			this.contentLength = totalBytes;
-		}
-		this.chunkedTransfer = this.contentLength < 0;
-		keepAlive = true;
-	}
+    @Override
+    public void close() throws IOException {
+        if (this.data != null) {
+            this.data.close();
+        }
+    }
 
-	@Override
-	public void close() throws IOException {
-		if (this.data != null) {
-			this.data.close();
-		}
-	}
+    /**
+     * Adds given line to the header.
+     */
+    public void addHeader(String name, String value) {
+        this.headers.put(name.toLowerCase(Locale.ROOT), requireNonNull(value));
+    }
 
-	/**
-	 * Adds given line to the header.
-	 */
-	public void addHeader(String name, String value) {
-		this.headers.put(name.toLowerCase(Locale.ROOT), requireNonNull(value));
-	}
+    public String getHeader(String name) {
+        return this.headers.get(name.toLowerCase(Locale.ROOT));
+    }
 
-	public String getHeader(String name) {
-		return this.headers.get(name.toLowerCase(Locale.ROOT));
-	}
+    public InputStream getData() {
+        return this.data;
+    }
 
-	public InputStream getData() {
-		return this.data;
-	}
+    public String getMimeType() {
+        return this.mimeType;
+    }
 
-	public String getMimeType() {
-		return this.mimeType;
-	}
+    public String getRequestMethod() {
+        return this.requestMethod;
+    }
 
-	public String getRequestMethod() {
-		return this.requestMethod;
-	}
+    public IStatus getStatus() {
+        return this.status;
+    }
 
-	public IStatus getStatus() {
-		return this.status;
-	}
+    public void setKeepAlive(boolean useKeepAlive) {
+        this.keepAlive = useKeepAlive;
+    }
 
-	public void setKeepAlive(boolean useKeepAlive) {
-		this.keepAlive = useKeepAlive;
-	}
+    /**
+     * Sends given response to the socket.
+     */
+    protected void send(OutputStream outputStream) {
+        SimpleDateFormat gmtFrmt
+            = new SimpleDateFormat("E, d MMM yyyy HH:mm:ss 'GMT'", Locale.US);
+        gmtFrmt.setTimeZone(TimeZone.getTimeZone("GMT"));
 
-	/**
-	 * Sends given response to the socket.
-	 */
-	protected void send(OutputStream outputStream) {
-		SimpleDateFormat gmtFrmt = new SimpleDateFormat("E, d MMM yyyy HH:mm:ss 'GMT'", Locale.US);
-		gmtFrmt.setTimeZone(TimeZone.getTimeZone("GMT"));
+        try {
+            if (this.status == null) {
+                throw new Error("sendResponse(): Status can't be null.");
+            }
+            PrintWriter pw = new PrintWriter(
+                new BufferedWriter(new OutputStreamWriter(
+                    outputStream, new ContentType(this.mimeType).getEncoding()
+                )),
+                false
+            );
+            pw.append("HTTP/1.1 ").append(this.status.getDescription()).append(" \r\n");
+            if (this.mimeType != null) {
+                printHeader(pw, "Content-Type", this.mimeType);
+            }
+            if (getHeader("date") == null) {
+                printHeader(pw, "Date", gmtFrmt.format(new Date()));
+            }
+            this.headers.forEach((name, value) -> printHeader(pw, name, value));
+            if (getHeader("connection") == null) {
+                printHeader(pw, "Connection", (this.keepAlive ? "keep-alive" : "close"));
+            }
+            long pending = this.data != null ? this.contentLength : 0;
+            if (!"HEAD".equals(this.requestMethod) && this.chunkedTransfer) {
+                printHeader(pw, "Transfer-Encoding", "chunked");
+            } else {
+                pending = sendContentLengthHeaderIfNotAlreadyPresent(pw, pending);
+            }
+            pw.append("\r\n");
+            pw.flush();
+            sendBodyWithCorrectTransferAndEncoding(outputStream, pending);
+            outputStream.flush();
+            NanoHTTPD.safeClose(this.data);
+        } catch (IOException ioe) {
+            log(ERROR, "Could not send response to the client", ioe);
+        }
+    }
 
-		try {
-			if (this.status == null) {
-				throw new Error("sendResponse(): Status can't be null.");
-			}
-			PrintWriter pw = new PrintWriter(new BufferedWriter(new OutputStreamWriter(outputStream, new ContentType(this.mimeType).getEncoding())), false);
-			pw.append("HTTP/1.1 ").append(this.status.getDescription()).append(" \r\n");
-			if (this.mimeType != null) {
-				printHeader(pw, "Content-Type", this.mimeType);
-			}
-			if (getHeader("date") == null) {
-				printHeader(pw, "Date", gmtFrmt.format(new Date()));
-			}
-			this.headers.forEach((name, value) -> printHeader(pw, name, value));
-			if (getHeader("connection") == null) {
-				printHeader(pw, "Connection", (this.keepAlive ? "keep-alive" : "close"));
-			}
-			long pending = this.data != null ? this.contentLength : 0;
-			if (!"HEAD".equals(this.requestMethod) && this.chunkedTransfer) {
-				printHeader(pw, "Transfer-Encoding", "chunked");
-			} else {
-				pending = sendContentLengthHeaderIfNotAlreadyPresent(pw, pending);
-			}
-			pw.append("\r\n");
-			pw.flush();
-			sendBodyWithCorrectTransferAndEncoding(outputStream, pending);
-			outputStream.flush();
-			NanoHTTPD.safeClose(this.data);
-		} catch (IOException ioe) {
-			log(ERROR, "Could not send response to the client", ioe);
-		}
-	}
+    protected void printHeader(PrintWriter pw, String key, String value) {
+        pw.append(key).append(": ").append(value).append("\r\n");
+    }
 
-	protected void printHeader(PrintWriter pw, String key, String value) {
-		pw.append(key).append(": ").append(value).append("\r\n");
-	}
+    protected long
+    sendContentLengthHeaderIfNotAlreadyPresent(PrintWriter pw, long defaultSize) {
+        String contentLengthString = getHeader("content-length");
+        if (contentLengthString == null) {
+            pw.print("Content-Length: " + defaultSize + "\r\n");
+            return defaultSize;
+        } else {
+            long size = defaultSize;
+            try {
+                size = Long.parseLong(contentLengthString);
+            } catch (NumberFormatException ex) {
+                log(ERROR, "content-length was not number " + contentLengthString);
+            }
+            return size;
+        }
+    }
 
-	protected long sendContentLengthHeaderIfNotAlreadyPresent(PrintWriter pw, long defaultSize) {
-		String contentLengthString = getHeader("content-length");
-		if (contentLengthString == null) {
-			pw.print("Content-Length: " + defaultSize + "\r\n");
-			return defaultSize;
-		} else {
-			long size = defaultSize;
-			try {
-				size = Long.parseLong(contentLengthString);
-			} catch (NumberFormatException ex) {
-				log(ERROR, "content-length was not number " + contentLengthString);
-			}
-			return size;
-		}
-	}
+    private void
+    sendBodyWithCorrectTransferAndEncoding(OutputStream outputStream, long pending)
+        throws IOException {
+        if (!"HEAD".equals(this.requestMethod) && this.chunkedTransfer) {
+            @SuppressWarnings("resource")
+            ChunkedOutputStream chunkedOutputStream
+                = new ChunkedOutputStream(outputStream);
+            sendBody(chunkedOutputStream, -1);
+            chunkedOutputStream.finish();
+        } else {
+            sendBody(outputStream, pending);
+        }
+    }
 
-	private void sendBodyWithCorrectTransferAndEncoding(OutputStream outputStream, long pending) throws IOException {
-		if (!"HEAD".equals(this.requestMethod) && this.chunkedTransfer) {
-			@SuppressWarnings("resource")
-			ChunkedOutputStream chunkedOutputStream = new ChunkedOutputStream(outputStream);
-			sendBody(chunkedOutputStream, -1);
-			chunkedOutputStream.finish();
-		} else {
-			sendBody(outputStream, pending);
-		}
-	}
+    /**
+     * Sends the body to the specified OutputStream. The pending parameter
+     * limits the maximum amounts of bytes sent unless it is -1, in which
+     * case everything is sent.
+     *
+     * @param outputStream
+     *                     the OutputStream to send data to
+     * @param pending
+     *                     -1 to send everything, otherwise sets a max limit to the
+     *                     number of bytes sent
+     * @throws IOException
+     *                     if something goes wrong while sending the data.
+     */
+    private void sendBody(OutputStream outputStream, long pending) throws IOException {
+        long BUFFER_SIZE = 16 * 1024;
+        byte[] buff = new byte[(int) BUFFER_SIZE];
+        boolean sendEverything = pending == -1;
+        while (pending > 0 || sendEverything) {
+            long bytesToRead
+                = sendEverything ? BUFFER_SIZE : Math.min(pending, BUFFER_SIZE);
+            int read = this.data.read(buff, 0, (int) bytesToRead);
+            if (read <= 0) {
+                break;
+            }
+            outputStream.write(buff, 0, read);
+            if (!sendEverything) {
+                pending -= read;
+            }
+        }
+    }
 
-	/**
-	 * Sends the body to the specified OutputStream. The pending parameter
-	 * limits the maximum amounts of bytes sent unless it is -1, in which
-	 * case everything is sent.
-	 *
-	 * @param outputStream
-	 *                     the OutputStream to send data to
-	 * @param pending
-	 *                     -1 to send everything, otherwise sets a max limit to the
-	 *                     number of bytes sent
-	 * @throws IOException
-	 *                     if something goes wrong while sending the data.
-	 */
-	private void sendBody(OutputStream outputStream, long pending) throws IOException {
-		long BUFFER_SIZE = 16 * 1024;
-		byte[] buff = new byte[(int) BUFFER_SIZE];
-		boolean sendEverything = pending == -1;
-		while (pending > 0 || sendEverything) {
-			long bytesToRead = sendEverything ? BUFFER_SIZE : Math.min(pending, BUFFER_SIZE);
-			int read = this.data.read(buff, 0, (int) bytesToRead);
-			if (read <= 0) {
-				break;
-			}
-			outputStream.write(buff, 0, read);
-			if (!sendEverything) {
-				pending -= read;
-			}
-		}
-	}
+    public void setChunkedTransfer(boolean chunkedTransfer) {
+        this.chunkedTransfer = chunkedTransfer;
+    }
 
-	public void setChunkedTransfer(boolean chunkedTransfer) {
-		this.chunkedTransfer = chunkedTransfer;
-	}
+    public void setData(InputStream data) {
+        this.data = data;
+    }
 
-	public void setData(InputStream data) {
-		this.data = data;
-	}
+    public void setMimeType(String mimeType) {
+        this.mimeType = mimeType;
+    }
 
-	public void setMimeType(String mimeType) {
-		this.mimeType = mimeType;
-	}
+    public void setRequestMethod(String requestMethod) {
+        this.requestMethod = requestMethod;
+    }
 
-	public void setRequestMethod(String requestMethod) {
-		this.requestMethod = requestMethod;
-	}
+    public void setStatus(IStatus status) {
+        this.status = status;
+    }
 
-	public void setStatus(IStatus status) {
-		this.status = status;
-	}
+    /**
+     * Create a text response with known length.
+     */
+    public static Response newFixedLength(IStatus status, String mimeType, String txt) {
+        ContentType contentType = new ContentType(mimeType);
+        if (txt == null) {
+            return newFixedLength(
+                status, mimeType, new ByteArrayInputStream(new byte[0]), 0
+            );
+        } else {
+            byte[] bytes;
+            try {
+                CharsetEncoder newEncoder
+                    = Charset.forName(contentType.getEncoding()).newEncoder();
+                if (!newEncoder.canEncode(txt)) {
+                    contentType = contentType.tryUTF8();
+                }
+                bytes = txt.getBytes(contentType.getEncoding());
+            } catch (UnsupportedEncodingException e) {
+                throw new RuntimeException(e); // never happens, utf-8 is always available
+            }
+            return newFixedLength(
+                status,
+                contentType.getContentTypeHeader(),
+                new ByteArrayInputStream(bytes),
+                bytes.length
+            );
+        }
+    }
 
-	/**
-	 * Create a text response with known length.
-	 */
-	public static Response newFixedLength(IStatus status, String mimeType, String txt) {
-		ContentType contentType = new ContentType(mimeType);
-		if (txt == null) {
-			return newFixedLength(status, mimeType, new ByteArrayInputStream(new byte[0]), 0);
-		} else {
-			byte[] bytes;
-			try {
-				CharsetEncoder newEncoder = Charset.forName(contentType.getEncoding()).newEncoder();
-				if (!newEncoder.canEncode(txt)) {
-					contentType = contentType.tryUTF8();
-				}
-				bytes = txt.getBytes(contentType.getEncoding());
-			} catch (UnsupportedEncodingException e) {
-				throw new RuntimeException(e); // never happens, utf-8 is always available
-			}
-			return newFixedLength(status, contentType.getContentTypeHeader(), new ByteArrayInputStream(bytes), bytes.length);
-		}
-	}
+    /**
+     * Create a response with known length.
+     */
+    public static Response
+    newFixedLength(IStatus status, String mimeType, InputStream data, long totalBytes) {
+        return new Response(status, mimeType, data, totalBytes);
+    }
 
-	/**
-	 * Create a response with known length.
-	 */
-	public static Response newFixedLength(IStatus status, String mimeType, InputStream data, long totalBytes) {
-		return new Response(status, mimeType, data, totalBytes);
-	}
-
-	/**
-	 * Create a response with unknown length (using HTTP 1.1 chunking).
-	 */
-	public static Response newChunked(IStatus status, String mimeType, InputStream data) {
-		return new Response(status, mimeType, data, -1);
-	}
+    /**
+     * Create a response with unknown length (using HTTP 1.1 chunking).
+     */
+    public static Response newChunked(IStatus status, String mimeType, InputStream data) {
+        return new Response(status, mimeType, data, -1);
+    }
 }

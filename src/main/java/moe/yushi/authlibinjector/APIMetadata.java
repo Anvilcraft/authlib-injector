@@ -38,60 +38,79 @@ import moe.yushi.authlibinjector.util.JsonUtils;
 import moe.yushi.authlibinjector.util.KeyUtils;
 
 public class APIMetadata {
+    public static APIMetadata parse(String apiRoot, String metadataResponse)
+        throws UncheckedIOException {
+        JSONObject response = asJsonObject(parseJson(metadataResponse));
 
-	public static APIMetadata parse(String apiRoot, String metadataResponse) throws UncheckedIOException {
-		JSONObject response = asJsonObject(parseJson(metadataResponse));
+        List<String> skinDomains = ofNullable(response.get("skinDomains"))
+                                       .map(
+                                           it
+                                           -> asJsonArray(it)
+                                                  .stream()
+                                                  .map(JsonUtils::asJsonString)
+                                                  .collect(toList())
+                                       )
+                                       .orElse(emptyList());
 
-		List<String> skinDomains =
-				ofNullable(response.get("skinDomains"))
-						.map(it -> asJsonArray(it).stream()
-								.map(JsonUtils::asJsonString)
-								.collect(toList()))
-						.orElse(emptyList());
+        Optional<PublicKey> decodedPublickey
+            = ofNullable(response.get("signaturePublickey"))
+                  .map(JsonUtils::asJsonString)
+                  .map(KeyUtils::parseSignaturePublicKey);
 
-		Optional<PublicKey> decodedPublickey =
-				ofNullable(response.get("signaturePublickey"))
-						.map(JsonUtils::asJsonString)
-						.map(KeyUtils::parseSignaturePublicKey);
+        Map<String, Object> meta
+            = ofNullable(response.get("meta"))
+                  .map(it -> (Map<String, Object>) new TreeMap<>(asJsonObject(it)))
+                  .orElse(emptyMap());
 
-		Map<String, Object> meta =
-				ofNullable(response.get("meta"))
-						.map(it -> (Map<String, Object>) new TreeMap<>(asJsonObject(it)))
-						.orElse(emptyMap());
+        return new APIMetadata(
+            apiRoot,
+            unmodifiableList(skinDomains),
+            unmodifiableMap(meta),
+            decodedPublickey
+        );
+    }
 
-		return new APIMetadata(apiRoot, unmodifiableList(skinDomains), unmodifiableMap(meta), decodedPublickey);
-	}
+    private String apiRoot;
+    private List<String> skinDomains;
+    private Optional<PublicKey> decodedPublickey;
+    private Map<String, Object> meta;
 
-	private String apiRoot;
-	private List<String> skinDomains;
-	private Optional<PublicKey> decodedPublickey;
-	private Map<String, Object> meta;
+    public APIMetadata(
+        String apiRoot,
+        List<String> skinDomains,
+        Map<String, Object> meta,
+        Optional<PublicKey> decodedPublickey
+    ) {
+        this.apiRoot = requireNonNull(apiRoot);
+        this.skinDomains = requireNonNull(skinDomains);
+        this.meta = requireNonNull(meta);
+        this.decodedPublickey = requireNonNull(decodedPublickey);
+    }
 
-	public APIMetadata(String apiRoot, List<String> skinDomains, Map<String, Object> meta, Optional<PublicKey> decodedPublickey) {
-		this.apiRoot = requireNonNull(apiRoot);
-		this.skinDomains = requireNonNull(skinDomains);
-		this.meta = requireNonNull(meta);
-		this.decodedPublickey = requireNonNull(decodedPublickey);
-	}
+    public String getApiRoot() {
+        return apiRoot;
+    }
 
-	public String getApiRoot() {
-		return apiRoot;
-	}
+    public List<String> getSkinDomains() {
+        return skinDomains;
+    }
 
-	public List<String> getSkinDomains() {
-		return skinDomains;
-	}
+    public Map<String, Object> getMeta() {
+        return meta;
+    }
 
-	public Map<String, Object> getMeta() {
-		return meta;
-	}
+    public Optional<PublicKey> getDecodedPublickey() {
+        return decodedPublickey;
+    }
 
-	public Optional<PublicKey> getDecodedPublickey() {
-		return decodedPublickey;
-	}
-
-	@Override
-	public String toString() {
-		return format("APIMetadata [apiRoot={0}, skinDomains={1}, decodedPublickey={2}, meta={3}]", apiRoot, skinDomains, decodedPublickey, meta);
-	}
+    @Override
+    public String toString() {
+        return format(
+            "APIMetadata [apiRoot={0}, skinDomains={1}, decodedPublickey={2}, meta={3}]",
+            apiRoot,
+            skinDomains,
+            decodedPublickey,
+            meta
+        );
+    }
 }

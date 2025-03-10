@@ -35,95 +35,125 @@ import moe.yushi.authlibinjector.transform.TransformContext;
 import moe.yushi.authlibinjector.transform.TransformUnit;
 
 public class MainArgumentsTransformer implements TransformUnit {
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        if ("net.minecraft.client.main.Main".equals(className)) {
+            return Optional.of(new ClassVisitor(ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String descriptor,
+                    String signature,
+                    String[] exceptions
+                ) {
+                    if ("main".equals(name)
+                        && "([Ljava/lang/String;)V".equals(descriptor)) {
+                        return new MethodVisitor(
+                            ASM9,
+                            super.visitMethod(
+                                access, name, descriptor, signature, exceptions
+                            )
+                        ) {
+                            @Override
+                            public void visitCode() {
+                                super.visitCode();
+                                ctx.markModified();
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		if ("net.minecraft.client.main.Main".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-					if ("main".equals(name) && "([Ljava/lang/String;)V".equals(descriptor)) {
-						return new MethodVisitor(ASM9, super.visitMethod(access, name, descriptor, signature, exceptions)) {
-							@Override
-							public void visitCode() {
-								super.visitCode();
-								ctx.markModified();
+                                super.visitVarInsn(ALOAD, 0);
+                                ctx.invokeCallback(
+                                    mv,
+                                    MainArgumentsTransformer.class,
+                                    "processMainArguments"
+                                );
+                                super.visitVarInsn(ASTORE, 0);
+                            }
+                        };
+                    } else {
+                        return super.visitMethod(
+                            access, name, descriptor, signature, exceptions
+                        );
+                    }
+                }
+            });
+        } else {
+            return Optional.empty();
+        }
+    }
 
-								super.visitVarInsn(ALOAD, 0);
-								ctx.invokeCallback(mv, MainArgumentsTransformer.class, "processMainArguments");
-								super.visitVarInsn(ASTORE, 0);
-							}
-						};
-					} else {
-						return super.visitMethod(access, name, descriptor, signature, exceptions);
-					}
-				}
-			});
-		} else {
-			return Optional.empty();
-		}
-	}
+    @Override
+    public String toString() {
+        return "Main Arguments Transformer";
+    }
 
-	@Override
-	public String toString() {
-		return "Main Arguments Transformer";
-	}
+    // ==== Main arguments processing ====
+    private static final List<Function<String[], String[]>> ARGUMENTS_LISTENERS
+        = new CopyOnWriteArrayList<>();
 
-	// ==== Main arguments processing ====
-	private static final List<Function<String[], String[]>> ARGUMENTS_LISTENERS = new CopyOnWriteArrayList<>();
+    @CallbackMethod
+    public static String[] processMainArguments(String[] args) {
+        log(DEBUG, "Original main arguments: " + Stream.of(args).collect(joining(" ")));
 
-	@CallbackMethod
-	public static String[] processMainArguments(String[] args) {
-		log(DEBUG, "Original main arguments: " + Stream.of(args).collect(joining(" ")));
+        String[] result = args;
+        for (Function<String[], String[]> listener : ARGUMENTS_LISTENERS) {
+            result = listener.apply(result);
+        }
+        log(DEBUG,
+            "Transformed main arguments: " + Stream.of(result).collect(joining(" ")));
+        return result;
+    }
 
-		String[] result = args;
-		for (Function<String[], String[]> listener : ARGUMENTS_LISTENERS) {
-			result = listener.apply(result);
-		}
-		log(DEBUG, "Transformed main arguments: " + Stream.of(result).collect(joining(" ")));
-		return result;
-	}
+    public static List<Function<String[], String[]>> getArgumentsListeners() {
+        return ARGUMENTS_LISTENERS;
+    }
 
-	public static List<Function<String[], String[]>> getArgumentsListeners() {
-		return ARGUMENTS_LISTENERS;
-	}
-	// ====
+    // ====
 
-	// ==== Version series detection ====
-	private static final List<Consumer<String>> VERSION_SERIES_LISTENERS = new CopyOnWriteArrayList<>();
+    // ==== Version series detection ====
+    private static final List<Consumer<String>> VERSION_SERIES_LISTENERS
+        = new CopyOnWriteArrayList<>();
 
-	public static Optional<String> inferVersionSeries(String[] args) {
-		boolean hit = false;
-		for (String arg : args) {
-			if (hit) {
-				if (arg.startsWith("--")) {
-					// arg doesn't seem to be a value
-					// maybe the previous argument is a value, but we wrongly recognized it as an option
-					hit = false;
-				} else {
-					return Optional.of(arg);
-				}
-			}
+    public static Optional<String> inferVersionSeries(String[] args) {
+        boolean hit = false;
+        for (String arg : args) {
+            if (hit) {
+                if (arg.startsWith("--")) {
+                    // arg doesn't seem to be a value
+                    // maybe the previous argument is a value, but we wrongly recognized
+                    // it as an option
+                    hit = false;
+                } else {
+                    return Optional.of(arg);
+                }
+            }
 
-			if ("--assetIndex".equals(arg)) {
-				hit = true;
-			}
-		}
-		return Optional.empty();
-	}
+            if ("--assetIndex".equals(arg)) {
+                hit = true;
+            }
+        }
+        return Optional.empty();
+    }
 
-	static {
-		getArgumentsListeners().add(args -> {
-			inferVersionSeries(args).ifPresent(versionSeries -> {
-				log(DEBUG, "Version series detected: " + versionSeries);
-				VERSION_SERIES_LISTENERS.forEach(listener -> listener.accept(versionSeries));
-			});
-			return args;
-		});
-	}
+    static {
+        getArgumentsListeners().add(args -> {
+            inferVersionSeries(args).ifPresent(versionSeries -> {
+                log(DEBUG, "Version series detected: " + versionSeries);
+                VERSION_SERIES_LISTENERS.forEach(
+                    listener -> listener.accept(versionSeries)
+                );
+            });
+            return args;
+        });
+    }
 
-	public static List<Consumer<String>> getVersionSeriesListeners() {
-		return VERSION_SERIES_LISTENERS;
-	}
-	// ====
+    public static List<Consumer<String>> getVersionSeriesListeners() {
+        return VERSION_SERIES_LISTENERS;
+    }
+
+    // ====
 }

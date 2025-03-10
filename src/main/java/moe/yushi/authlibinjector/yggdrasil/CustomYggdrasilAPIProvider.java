@@ -21,25 +21,25 @@ import java.util.UUID;
 import moe.yushi.authlibinjector.APIMetadata;
 
 public class CustomYggdrasilAPIProvider implements YggdrasilAPIProvider {
+    private String apiRoot;
 
-	private String apiRoot;
+    public CustomYggdrasilAPIProvider(APIMetadata configuration) {
+        this.apiRoot = configuration.getApiRoot();
+    }
 
-	public CustomYggdrasilAPIProvider(APIMetadata configuration) {
-		this.apiRoot = configuration.getApiRoot();
-	}
+    @Override
+    public String queryUUIDsByNames() {
+        return apiRoot + "api/profiles/minecraft";
+    }
 
-	@Override
-	public String queryUUIDsByNames() {
-		return apiRoot + "api/profiles/minecraft";
-	}
+    @Override
+    public String queryProfile(UUID uuid) {
+        return apiRoot + "sessionserver/session/minecraft/profile/"
+            + toUnsignedUUID(uuid);
+    }
 
-	@Override
-	public String queryProfile(UUID uuid) {
-		return apiRoot + "sessionserver/session/minecraft/profile/" + toUnsignedUUID(uuid);
-	}
-
-	@Override
-	public String toString() {
-		return apiRoot;
-	}
+    @Override
+    public String toString() {
+        return apiRoot;
+    }
 }

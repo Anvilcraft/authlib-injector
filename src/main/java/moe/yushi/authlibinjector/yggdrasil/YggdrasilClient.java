@@ -42,86 +42,96 @@ import moe.yushi.authlibinjector.internal.org.json.simple.JSONObject;
 import moe.yushi.authlibinjector.yggdrasil.GameProfile.PropertyValue;
 
 public class YggdrasilClient {
+    private YggdrasilAPIProvider apiProvider;
+    private Proxy proxy;
 
-	private YggdrasilAPIProvider apiProvider;
-	private Proxy proxy;
+    public YggdrasilClient(YggdrasilAPIProvider apiProvider) {
+        this(apiProvider, null);
+    }
 
-	public YggdrasilClient(YggdrasilAPIProvider apiProvider) {
-		this(apiProvider, null);
-	}
+    public YggdrasilClient(YggdrasilAPIProvider apiProvider, Proxy proxy) {
+        this.apiProvider = apiProvider;
+        this.proxy = proxy;
+    }
 
-	public YggdrasilClient(YggdrasilAPIProvider apiProvider, Proxy proxy) {
-		this.apiProvider = apiProvider;
-		this.proxy = proxy;
-	}
+    public Map<String, UUID> queryUUIDs(Set<String> names) throws UncheckedIOException {
+        String responseText;
+        try {
+            responseText = asString(http(
+                "POST",
+                apiProvider.queryUUIDsByNames(),
+                JSONArray.toJSONString(names).getBytes(UTF_8),
+                CONTENT_TYPE_JSON,
+                proxy
+            ));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        log(DEBUG,
+            "Query UUIDs of " + names + " at [" + apiProvider
+                + "], response: " + responseText);
 
-	public Map<String, UUID> queryUUIDs(Set<String> names) throws UncheckedIOException {
-		String responseText;
-		try {
-			responseText = asString(http("POST", apiProvider.queryUUIDsByNames(),
-					JSONArray.toJSONString(names).getBytes(UTF_8), CONTENT_TYPE_JSON,
-					proxy));
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
-		log(DEBUG, "Query UUIDs of " + names + " at [" + apiProvider + "], response: " + responseText);
+        Map<String, UUID> result = new LinkedHashMap<>();
+        for (Object rawProfile : asJsonArray(parseJson(responseText))) {
+            JSONObject profile = asJsonObject(rawProfile);
+            result.put(
+                asJsonString(profile.get("name")),
+                parseUnsignedUUID(asJsonString(profile.get("id")))
+            );
+        }
+        return result;
+    }
 
-		Map<String, UUID> result = new LinkedHashMap<>();
-		for (Object rawProfile : asJsonArray(parseJson(responseText))) {
-			JSONObject profile = asJsonObject(rawProfile);
-			result.put(
-					asJsonString(profile.get("name")),
-					parseUnsignedUUID(asJsonString(profile.get("id"))));
-		}
-		return result;
-	}
+    public Optional<UUID> queryUUID(String name) throws UncheckedIOException {
+        return Optional.ofNullable(queryUUIDs(singleton(name)).get(name));
+    }
 
-	public Optional<UUID> queryUUID(String name) throws UncheckedIOException {
-		return Optional.ofNullable(queryUUIDs(singleton(name)).get(name));
-	}
+    public Optional<GameProfile> queryProfile(UUID uuid, boolean withSignature)
+        throws UncheckedIOException {
+        String url = apiProvider.queryProfile(uuid);
+        if (withSignature) {
+            url += "?unsigned=false";
+        }
+        String responseText;
+        try {
+            responseText = asString(http("GET", url, proxy));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        if (responseText.isEmpty()) {
+            log(DEBUG,
+                "Query profile of [" + uuid + "] at [" + apiProvider + "], not found");
+            return Optional.empty();
+        }
+        log(DEBUG,
+            "Query profile of [" + uuid + "] at [" + apiProvider
+                + "], response: " + responseText);
 
-	public Optional<GameProfile> queryProfile(UUID uuid, boolean withSignature) throws UncheckedIOException {
-		String url = apiProvider.queryProfile(uuid);
-		if (withSignature) {
-			url += "?unsigned=false";
-		}
-		String responseText;
-		try {
-			responseText = asString(http("GET", url, proxy));
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
-		if (responseText.isEmpty()) {
-			log(DEBUG, "Query profile of [" + uuid + "] at [" + apiProvider + "], not found");
-			return Optional.empty();
-		}
-		log(DEBUG, "Query profile of [" + uuid + "] at [" + apiProvider + "], response: " + responseText);
+        return Optional.of(parseGameProfile(asJsonObject(parseJson(responseText))));
+    }
 
-		return Optional.of(parseGameProfile(asJsonObject(parseJson(responseText))));
-	}
+    private GameProfile parseGameProfile(JSONObject json) {
+        GameProfile profile = new GameProfile();
+        profile.id = parseUnsignedUUID(asJsonString(json.get("id")));
+        profile.name = asJsonString(json.get("name"));
+        profile.properties = new LinkedHashMap<>();
+        for (Object rawProperty : asJsonArray(json.get("properties"))) {
+            JSONObject property = (JSONObject) rawProperty;
+            PropertyValue entry = new PropertyValue();
+            entry.value = asJsonString(property.get("value"));
+            if (property.containsKey("signature")) {
+                entry.signature = asJsonString(property.get("signature"));
+            }
+            profile.properties.put(asJsonString(property.get("name")), entry);
+        }
+        return profile;
+    }
 
-	private GameProfile parseGameProfile(JSONObject json) {
-		GameProfile profile = new GameProfile();
-		profile.id = parseUnsignedUUID(asJsonString(json.get("id")));
-		profile.name = asJsonString(json.get("name"));
-		profile.properties = new LinkedHashMap<>();
-		for (Object rawProperty : asJsonArray(json.get("properties"))) {
-			JSONObject property = (JSONObject) rawProperty;
-			PropertyValue entry = new PropertyValue();
-			entry.value = asJsonString(property.get("value"));
-			if (property.containsKey("signature")) {
-				entry.signature = asJsonString(property.get("signature"));
-			}
-			profile.properties.put(asJsonString(property.get("name")), entry);
-		}
-		return profile;
-	}
-
-	private UUID parseUnsignedUUID(String uuid) throws UncheckedIOException {
-		try {
-			return fromUnsignedUUID(uuid);
-		} catch (IllegalArgumentException e) {
-			throw newUncheckedIOException(e.getMessage());
-		}
-	}
+    private UUID parseUnsignedUUID(String uuid) throws UncheckedIOException {
+        try {
+            return fromUnsignedUUID(uuid);
+        } catch (IllegalArgumentException e) {
+            throw newUncheckedIOException(e.getMessage());
+        }
+    }
 }

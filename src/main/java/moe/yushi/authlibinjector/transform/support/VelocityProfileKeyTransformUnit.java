@@ -27,39 +27,57 @@ import moe.yushi.authlibinjector.transform.TransformUnit;
 
 /**
  * Hacks Velocity to bypass profile key signature validation.
- * See https://github.com/PaperMC/Velocity/commit/1a3fba4250553702d9dcd05731d04347bfc24c9f .
+ * See https://github.com/PaperMC/Velocity/commit/1a3fba4250553702d9dcd05731d04347bfc24c9f
+ * .
  */
 public class VelocityProfileKeyTransformUnit implements TransformUnit {
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        if ("com.velocitypowered.proxy.crypto.IdentifiedKeyImpl".equals(className)) {
+            return Optional.of(new ClassVisitor(ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String descriptor,
+                    String signature,
+                    String[] exceptions
+                ) {
+                    if ("validateData".equals(name)
+                        && "(Ljava/util/UUID;)Ljava/lang/Boolean;".equals(descriptor)) {
+                        ctx.markModified();
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		if ("com.velocitypowered.proxy.crypto.IdentifiedKeyImpl".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-					if ("validateData".equals(name) && "(Ljava/util/UUID;)Ljava/lang/Boolean;".equals(descriptor)) {
-						ctx.markModified();
+                        MethodVisitor mv = super.visitMethod(
+                            access, name, descriptor, signature, exceptions
+                        );
+                        mv.visitCode();
+                        mv.visitFieldInsn(
+                            GETSTATIC, "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;"
+                        );
+                        mv.visitInsn(ARETURN);
+                        mv.visitMaxs(-1, -1);
+                        mv.visitEnd();
 
-						MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-						mv.visitCode();
-						mv.visitFieldInsn(GETSTATIC, "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;");
-						mv.visitInsn(ARETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
+                        return null;
+                    } else {
+                        return super.visitMethod(
+                            access, name, descriptor, signature, exceptions
+                        );
+                    }
+                }
+            });
+        } else {
+            return Optional.empty();
+        }
+    }
 
-						return null;
-					} else {
-						return super.visitMethod(access, name, descriptor, signature, exceptions);
-					}
-				}
-			});
-		} else {
-			return Optional.empty();
-		}
-	}
-
-	@Override
-	public String toString() {
-		return "Velocity Profile Key Transformer";
-	}
+    @Override
+    public String toString() {
+        return "Velocity Profile Key Transformer";
+    }
 }

@@ -27,78 +27,82 @@ import java.net.Proxy;
 import java.net.URL;
 
 public final class IOUtils {
+    public static final String CONTENT_TYPE_JSON = "application/json; charset=utf-8";
+    public static final String CONTENT_TYPE_TEXT = "text/plain; charset=utf-8";
 
-	public static final String CONTENT_TYPE_JSON = "application/json; charset=utf-8";
-	public static final String CONTENT_TYPE_TEXT = "text/plain; charset=utf-8";
+    private static HttpURLConnection createConnection(String url, Proxy proxy)
+        throws IOException {
+        if (proxy == null) {
+            return (HttpURLConnection) new URL(url).openConnection();
+        } else {
+            return (HttpURLConnection) new URL(url).openConnection(proxy);
+        }
+    }
 
-	private static HttpURLConnection createConnection(String url, Proxy proxy) throws IOException {
-		if (proxy == null) {
-			return (HttpURLConnection) new URL(url).openConnection();
-		} else {
-			return (HttpURLConnection) new URL(url).openConnection(proxy);
-		}
-	}
+    public static byte[] http(String method, String url) throws IOException {
+        return http(method, url, null);
+    }
 
-	public static byte[] http(String method, String url) throws IOException {
-		return http(method, url, null);
-	}
+    public static byte[] http(String method, String url, Proxy proxy) throws IOException {
+        HttpURLConnection conn = createConnection(url, proxy);
+        conn.setRequestMethod(method);
+        try (InputStream in = conn.getInputStream()) {
+            return asBytes(in);
+        }
+    }
 
-	public static byte[] http(String method, String url, Proxy proxy) throws IOException {
-		HttpURLConnection conn = createConnection(url, proxy);
-		conn.setRequestMethod(method);
-		try (InputStream in = conn.getInputStream()) {
-			return asBytes(in);
-		}
-	}
+    public static byte[]
+    http(String method, String url, byte[] payload, String contentType)
+        throws IOException {
+        return http(method, url, payload, contentType, null);
+    }
 
-	public static byte[] http(String method, String url, byte[] payload, String contentType) throws IOException {
-		return http(method, url, payload, contentType, null);
-	}
+    public static byte[]
+    http(String method, String url, byte[] payload, String contentType, Proxy proxy)
+        throws IOException {
+        HttpURLConnection conn = createConnection(url, proxy);
+        conn.setRequestMethod(method);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", contentType);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(payload);
+        }
+        try (InputStream in = conn.getInputStream()) {
+            return asBytes(in);
+        }
+    }
 
-	public static byte[] http(String method, String url, byte[] payload, String contentType, Proxy proxy) throws IOException {
-		HttpURLConnection conn = createConnection(url, proxy);
-		conn.setRequestMethod(method);
-		conn.setDoOutput(true);
-		conn.setRequestProperty("Content-Type", contentType);
-		try (OutputStream out = conn.getOutputStream()) {
-			out.write(payload);
-		}
-		try (InputStream in = conn.getInputStream()) {
-			return asBytes(in);
-		}
-	}
+    public static byte[] asBytes(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        transfer(in, out);
+        return out.toByteArray();
+    }
 
-	public static byte[] asBytes(InputStream in) throws IOException {
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		transfer(in, out);
-		return out.toByteArray();
-	}
+    public static void transfer(InputStream from, OutputStream to) throws IOException {
+        byte[] buf = new byte[8192];
+        int read;
+        while ((read = from.read(buf)) != -1) {
+            to.write(buf, 0, read);
+        }
+    }
 
-	public static void transfer(InputStream from, OutputStream to) throws IOException {
-		byte[] buf = new byte[8192];
-		int read;
-		while ((read = from.read(buf)) != -1) {
-			to.write(buf, 0, read);
-		}
-	}
+    public static String asString(byte[] bytes) {
+        return new String(bytes, UTF_8);
+    }
 
-	public static String asString(byte[] bytes) {
-		return new String(bytes, UTF_8);
-	}
+    public static String removeNewLines(String input) {
+        return input.replace("\n", "").replace("\r", "");
+    }
 
-	public static String removeNewLines(String input) {
-		return input.replace("\n", "")
-				.replace("\r", "");
-	}
+    public static UncheckedIOException newUncheckedIOException(String message)
+        throws UncheckedIOException {
+        return new UncheckedIOException(new IOException(message));
+    }
 
-	public static UncheckedIOException newUncheckedIOException(String message) throws UncheckedIOException {
-		return new UncheckedIOException(new IOException(message));
-	}
+    public static UncheckedIOException
+    newUncheckedIOException(String message, Throwable cause) throws UncheckedIOException {
+        return new UncheckedIOException(new IOException(message, cause));
+    }
 
-	public static UncheckedIOException newUncheckedIOException(String message, Throwable cause) throws UncheckedIOException {
-		return new UncheckedIOException(new IOException(message, cause));
-	}
-
-	private IOUtils() {}
-
+    private IOUtils() {}
 }

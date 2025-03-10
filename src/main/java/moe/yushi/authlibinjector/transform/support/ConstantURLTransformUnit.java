@@ -22,20 +22,19 @@ import moe.yushi.authlibinjector.httpd.URLProcessor;
 import moe.yushi.authlibinjector.transform.LdcTransformUnit;
 
 public class ConstantURLTransformUnit extends LdcTransformUnit {
+    private URLProcessor urlProcessor;
 
-	private URLProcessor urlProcessor;
+    public ConstantURLTransformUnit(URLProcessor urlProcessor) {
+        this.urlProcessor = urlProcessor;
+    }
 
-	public ConstantURLTransformUnit(URLProcessor urlProcessor) {
-		this.urlProcessor = urlProcessor;
-	}
+    @Override
+    protected Optional<String> transformLdc(String input) {
+        return urlProcessor.transformURL(input);
+    }
 
-	@Override
-	protected Optional<String> transformLdc(String input) {
-		return urlProcessor.transformURL(input);
-	}
-
-	@Override
-	public String toString() {
-		return "Constant URL Transformer";
-	}
+    @Override
+    public String toString() {
+        return "Constant URL Transformer";
+    }
 }

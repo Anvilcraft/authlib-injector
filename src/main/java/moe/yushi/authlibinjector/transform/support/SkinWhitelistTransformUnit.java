@@ -31,96 +31,109 @@ import moe.yushi.authlibinjector.transform.TransformContext;
 import moe.yushi.authlibinjector.transform.TransformUnit;
 
 public class SkinWhitelistTransformUnit implements TransformUnit {
+    public static boolean domainMatches(String pattern, String domain) {
+        // for security concern, empty pattern matches nothing
+        if (pattern.isEmpty()) {
+            return false;
+        }
+        if (pattern.startsWith(".")) {
+            return domain.endsWith(pattern);
+        } else {
+            return domain.equals(pattern);
+        }
+    }
 
-	public static boolean domainMatches(String pattern, String domain) {
-		// for security concern, empty pattern matches nothing
-		if (pattern.isEmpty()) {
-			return false;
-		}
-		if (pattern.startsWith(".")) {
-			return domain.endsWith(pattern);
-		} else {
-			return domain.equals(pattern);
-		}
-	}
+    private static final String[] DEFAULT_WHITELISTED_DOMAINS
+        = { ".minecraft.net", ".mojang.com" };
 
-	private static final String[] DEFAULT_WHITELISTED_DOMAINS = {
-			".minecraft.net",
-			".mojang.com"
-	};
+    private static final String[] DEFAULT_BLACKLISTED_DOMAINS
+        = { "education.minecraft.net", "bugs.mojang.com", "feedback.minecraft.net" };
 
-	private static final String[] DEFAULT_BLACKLISTED_DOMAINS = {
-			"education.minecraft.net",
-			"bugs.mojang.com",
-			"feedback.minecraft.net"
-	};
+    private static final List<String> WHITELISTED_DOMAINS = new CopyOnWriteArrayList<>();
 
-	private static final List<String> WHITELISTED_DOMAINS = new CopyOnWriteArrayList<>();
+    public static List<String> getWhitelistedDomains() {
+        return WHITELISTED_DOMAINS;
+    }
 
-	public static List<String> getWhitelistedDomains() {
-		return WHITELISTED_DOMAINS;
-	}
+    @CallbackMethod
+    public static boolean isWhitelistedDomain(String url) {
+        System.out.println(url);
+        String domain;
+        try {
+            domain = new URI(url).getHost();
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid URL '" + url + "'");
+        }
 
-	@CallbackMethod
-	public static boolean isWhitelistedDomain(String url) {
-		System.out.println(url);
-		String domain;
-		try {
-			domain = new URI(url).getHost();
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException("Invalid URL '" + url + "'");
-		}
+        for (String pattern : DEFAULT_BLACKLISTED_DOMAINS) {
+            if (domainMatches(pattern, domain)) {
+                return false;
+            }
+        }
 
-		for (String pattern : DEFAULT_BLACKLISTED_DOMAINS) {
-			if (domainMatches(pattern, domain)) {
-				return false;
-			}
-		}
+        for (String pattern : DEFAULT_WHITELISTED_DOMAINS) {
+            if (domainMatches(pattern, domain)) {
+                return true;
+            }
+        }
+        for (String pattern : WHITELISTED_DOMAINS) {
+            if (domainMatches(pattern, domain)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
-		for (String pattern : DEFAULT_WHITELISTED_DOMAINS) {
-			if (domainMatches(pattern, domain)) {
-				return true;
-			}
-		}
-		for (String pattern : WHITELISTED_DOMAINS) {
-			if (domainMatches(pattern, domain)) {
-				return true;
-			}
-		}
-		return false;
-	}
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        if ("com.mojang.authlib.yggdrasil.YggdrasilMinecraftSessionService".equals(
+                className
+            )
+            || "com.mojang.authlib.yggdrasil.TextureUrlChecker".equals(className)) {
+            return Optional.of(new ClassVisitor(ASM9, writer) {
+                @Override
+                public MethodVisitor visitMethod(
+                    int access,
+                    String name,
+                    String desc,
+                    String signature,
+                    String[] exceptions
+                ) {
+                    if (("isWhitelistedDomain".equals(name)
+                         || "isAllowedTextureDomain".equals(name))
+                        && "(Ljava/lang/String;)Z".equals(desc)) {
+                        ctx.markModified();
+                        MethodVisitor mv = super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                        mv.visitCode();
+                        mv.visitVarInsn(ALOAD, 0);
+                        ctx.invokeCallback(
+                            mv, SkinWhitelistTransformUnit.class, "isWhitelistedDomain"
+                        );
+                        mv.visitInsn(IRETURN);
+                        mv.visitMaxs(-1, -1);
+                        mv.visitEnd();
+                        return null;
+                    } else {
+                        return super.visitMethod(
+                            access, name, desc, signature, exceptions
+                        );
+                    }
+                }
+            });
+        } else {
+            return Optional.empty();
+        }
+    }
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		if ("com.mojang.authlib.yggdrasil.YggdrasilMinecraftSessionService".equals(className) || "com.mojang.authlib.yggdrasil.TextureUrlChecker".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-					if (("isWhitelistedDomain".equals(name) || "isAllowedTextureDomain".equals(name)) &&
-							"(Ljava/lang/String;)Z".equals(desc)) {
-						ctx.markModified();
-						MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
-						mv.visitCode();
-						mv.visitVarInsn(ALOAD, 0);
-						ctx.invokeCallback(mv, SkinWhitelistTransformUnit.class, "isWhitelistedDomain");
-						mv.visitInsn(IRETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
-						return null;
-					} else {
-						return super.visitMethod(access, name, desc, signature, exceptions);
-					}
-				}
-
-			});
-		} else {
-			return Optional.empty();
-		}
-	}
-
-	@Override
-	public String toString() {
-		return "Texture Whitelist Transformer";
-	}
+    @Override
+    public String toString() {
+        return "Texture Whitelist Transformer";
+    }
 }

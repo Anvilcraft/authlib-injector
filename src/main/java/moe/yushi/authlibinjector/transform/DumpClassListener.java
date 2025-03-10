@@ -26,23 +26,32 @@ import java.nio.file.StandardOpenOption;
 import java.util.List;
 
 public class DumpClassListener implements ClassLoadingListener {
+    private Path outputPath;
 
-	private Path outputPath;
+    public DumpClassListener(Path outputPath) {
+        this.outputPath = outputPath;
+    }
 
-	public DumpClassListener(Path outputPath) {
-		this.outputPath = outputPath;
-	}
-
-	@Override
-	public void onClassLoading(ClassLoader classLoader, String className, byte[] bytecode, List<TransformUnit> appliedTransformers) {
-		if (!appliedTransformers.isEmpty()) {
-			Path dumpFile = outputPath.resolve(className + "_dump.class");
-			try {
-				Files.write(dumpFile, bytecode, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-				log(INFO,"Transformed class is dumped to [" + dumpFile + "]");
-			} catch (IOException e) {
-				log(WARNING, "Failed to dump class [" + className + "]", e);
-			}
-		}
-	}
+    @Override
+    public void onClassLoading(
+        ClassLoader classLoader,
+        String className,
+        byte[] bytecode,
+        List<TransformUnit> appliedTransformers
+    ) {
+        if (!appliedTransformers.isEmpty()) {
+            Path dumpFile = outputPath.resolve(className + "_dump.class");
+            try {
+                Files.write(
+                    dumpFile,
+                    bytecode,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+                );
+                log(INFO, "Transformed class is dumped to [" + dumpFile + "]");
+            } catch (IOException e) {
+                log(WARNING, "Failed to dump class [" + className + "]", e);
+            }
+        }
+    }
 }

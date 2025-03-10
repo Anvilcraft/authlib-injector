@@ -78,294 +78,314 @@ import moe.yushi.authlibinjector.yggdrasil.MojangYggdrasilAPIProvider;
 import moe.yushi.authlibinjector.yggdrasil.YggdrasilClient;
 
 public final class AuthlibInjector {
-	private AuthlibInjector() {}
+    private AuthlibInjector() {}
 
-	private static boolean booted = false;
-	private static Instrumentation instrumentation;
-	private static boolean retransformSupported;
-	private static ClassTransformer classTransformer;
+    private static boolean booted = false;
+    private static Instrumentation instrumentation;
+    private static boolean retransformSupported;
+    private static ClassTransformer classTransformer;
 
-	public static synchronized void bootstrap(Instrumentation instrumentation, String apiUrl) throws InitializationException {
-		if (booted) {
-			log(INFO, "Already started, skipping");
-			return;
-		}
-		booted = true;
-		AuthlibInjector.instrumentation = requireNonNull(instrumentation);
-		Config.init();
+    public static synchronized void
+    bootstrap(Instrumentation instrumentation, String apiUrl)
+        throws InitializationException {
+        if (booted) {
+            log(INFO, "Already started, skipping");
+            return;
+        }
+        booted = true;
+        AuthlibInjector.instrumentation = requireNonNull(instrumentation);
+        Config.init();
         CacheManager.INSTANCE.createCache();
 
-		retransformSupported = instrumentation.isRetransformClassesSupported();
-		if (!retransformSupported) {
-			log(WARNING, "Retransform is not supported");
-		}
+        retransformSupported = instrumentation.isRetransformClassesSupported();
+        if (!retransformSupported) {
+            log(WARNING, "Retransform is not supported");
+        }
 
-		log(INFO, "Version: " + AuthlibInjector.class.getPackage().getImplementationVersion());
+        log(INFO,
+            "Version: " + AuthlibInjector.class.getPackage().getImplementationVersion());
 
-		APIMetadata apiMetadata = fetchAPIMetadata(apiUrl);
-		classTransformer = createTransformer(apiMetadata);
-		instrumentation.addTransformer(classTransformer, retransformSupported);
+        APIMetadata apiMetadata = fetchAPIMetadata(apiUrl);
+        classTransformer = createTransformer(apiMetadata);
+        instrumentation.addTransformer(classTransformer, retransformSupported);
 
-		ProxyParameterWorkaround.init();
-		MC52974Workaround.init();
-		MC52974_1710Workaround.init();
-		if (!Config.noShowServerName) {
-			AuthServerNameInjector.init(apiMetadata);
-		}
-	}
+        ProxyParameterWorkaround.init();
+        MC52974Workaround.init();
+        MC52974_1710Workaround.init();
+        if (!Config.noShowServerName) {
+            AuthServerNameInjector.init(apiMetadata);
+        }
+    }
 
-	private static Optional<String> getPrefetchedResponse() {
-		String prefetched = System.getProperty("authlibinjector.yggdrasil.prefetched");
-		if (prefetched == null) {
-			prefetched = System.getProperty("org.to2mbn.authlibinjector.config.prefetched");
-			if (prefetched != null) {
-				log(WARNING, "'-Dorg.to2mbn.authlibinjector.config.prefetched=' is deprecated, use '-Dauthlibinjector.yggdrasil.prefetched=' instead");
-			}
-		}
-		return Optional.ofNullable(prefetched);
-	}
+    private static Optional<String> getPrefetchedResponse() {
+        String prefetched = System.getProperty("authlibinjector.yggdrasil.prefetched");
+        if (prefetched == null) {
+            prefetched
+                = System.getProperty("org.to2mbn.authlibinjector.config.prefetched");
+            if (prefetched != null) {
+                log(WARNING,
+                    "'-Dorg.to2mbn.authlibinjector.config.prefetched=' is deprecated, "
+                    + "use '-Dauthlibinjector.yggdrasil.prefetched=' instead");
+            }
+        }
+        return Optional.ofNullable(prefetched);
+    }
 
-	private static APIMetadata fetchAPIMetadata(String apiUrl) {
-		if (apiUrl == null || apiUrl.isEmpty()) {
-			log(ERROR, "No authentication server specified");
-			throw new InitializationException();
-		}
+    private static APIMetadata fetchAPIMetadata(String apiUrl) {
+        if (apiUrl == null || apiUrl.isEmpty()) {
+            log(ERROR, "No authentication server specified");
+            throw new InitializationException();
+        }
 
-		apiUrl = addHttpsIfMissing(apiUrl);
-		log(INFO, "Authentication server: " + apiUrl);
-		warnIfHttp(apiUrl);
+        apiUrl = addHttpsIfMissing(apiUrl);
+        log(INFO, "Authentication server: " + apiUrl);
+        warnIfHttp(apiUrl);
 
-		String metadataResponse;
+        String metadataResponse;
 
-		Optional<String> prefetched = getPrefetchedResponse();
-		if (prefetched.isPresent()) {
+        Optional<String> prefetched = getPrefetchedResponse();
+        if (prefetched.isPresent()) {
+            log(DEBUG, "Prefetched metadata detected");
+            try {
+                metadataResponse = new String(
+                    Base64.getDecoder().decode(removeNewLines(prefetched.get())), UTF_8
+                );
+            } catch (IllegalArgumentException e) {
+                log(ERROR,
+                    "Unable to decode metadata: " + e + "\n"
+                        + "Encoded metadata:\n" + prefetched.get());
+                throw new InitializationException(e);
+            }
 
-			log(DEBUG, "Prefetched metadata detected");
-			try {
-				metadataResponse = new String(Base64.getDecoder().decode(removeNewLines(prefetched.get())), UTF_8);
-			} catch (IllegalArgumentException e) {
-				log(ERROR, "Unable to decode metadata: " + e + "\n"
-						+ "Encoded metadata:\n"
-						+ prefetched.get());
-				throw new InitializationException(e);
-			}
+        } else {
+            try {
+                HttpURLConnection connection
+                    = (HttpURLConnection) new URL(apiUrl).openConnection();
 
-		} else {
+                String ali = connection.getHeaderField("x-authlib-injector-api-location");
+                if (ali != null) {
+                    URL absoluteAli = new URL(connection.getURL(), ali);
+                    if (!urlEqualsIgnoreSlash(apiUrl, absoluteAli.toString())) {
+                        // usually the URL that ALI points to is on the same host
+                        // so the TCP connection can be reused
+                        // we need to consume the response to make the connection reusable
+                        try (InputStream in = connection.getInputStream()) {
+                            while (in.read() != -1)
+                                ;
+                        } catch (IOException e) {}
 
-			try {
-				HttpURLConnection connection = (HttpURLConnection) new URL(apiUrl).openConnection();
+                        log(INFO, "Redirect to: " + absoluteAli);
+                        apiUrl = absoluteAli.toString();
+                        warnIfHttp(apiUrl);
+                        connection = (HttpURLConnection) absoluteAli.openConnection();
+                    }
+                }
 
-				String ali = connection.getHeaderField("x-authlib-injector-api-location");
-				if (ali != null) {
-					URL absoluteAli = new URL(connection.getURL(), ali);
-					if (!urlEqualsIgnoreSlash(apiUrl, absoluteAli.toString())) {
+                try (InputStream in = connection.getInputStream()) {
+                    metadataResponse = asString(asBytes(in));
+                }
+            } catch (IOException e) {
+                log(ERROR, "Failed to fetch metadata: " + e);
+                throw new InitializationException(e);
+            }
+        }
 
-						// usually the URL that ALI points to is on the same host
-						// so the TCP connection can be reused
-						// we need to consume the response to make the connection reusable
-						try (InputStream in = connection.getInputStream()) {
-							while (in.read() != -1)
-								;
-						} catch (IOException e) {
-						}
+        log(DEBUG, "Metadata: " + metadataResponse);
 
-						log(INFO, "Redirect to: " + absoluteAli);
-						apiUrl = absoluteAli.toString();
-						warnIfHttp(apiUrl);
-						connection = (HttpURLConnection) absoluteAli.openConnection();
-					}
-				}
+        if (!apiUrl.endsWith("/")) {
+            apiUrl += "/";
+        }
 
-				try (InputStream in = connection.getInputStream()) {
-					metadataResponse = asString(asBytes(in));
-				}
-			} catch (IOException e) {
-				log(ERROR, "Failed to fetch metadata: " + e);
-				throw new InitializationException(e);
-			}
+        APIMetadata metadata;
+        try {
+            metadata = APIMetadata.parse(apiUrl, metadataResponse);
+        } catch (UncheckedIOException e) {
+            log(ERROR,
+                "Unable to parse metadata: " + e.getCause() + "\n"
+                    + "Raw metadata:\n" + metadataResponse);
+            throw new InitializationException(e);
+        }
+        log(DEBUG, "Parsed metadata: " + metadata);
+        return metadata;
+    }
 
-		}
+    private static void warnIfHttp(String url) {
+        if (url.toLowerCase().startsWith("http://")) {
+            log(WARNING,
+                "You are using HTTP protocol, which is INSECURE! Please switch to HTTPS "
+                + "if possible.");
+        }
+    }
 
-		log(DEBUG, "Metadata: " + metadataResponse);
+    private static String addHttpsIfMissing(String url) {
+        String lowercased = url.toLowerCase();
+        if (!lowercased.startsWith("http://") && !lowercased.startsWith("https://")) {
+            url = "https://" + url;
+        }
+        return url;
+    }
 
-		if (!apiUrl.endsWith("/")) {
-			apiUrl += "/";
-		}
+    private static boolean urlEqualsIgnoreSlash(String a, String b) {
+        if (!a.endsWith("/"))
+            a += "/";
+        if (!b.endsWith("/"))
+            b += "/";
+        return a.equals(b);
+    }
 
-		APIMetadata metadata;
-		try {
-			metadata = APIMetadata.parse(apiUrl, metadataResponse);
-		} catch (UncheckedIOException e) {
-			log(ERROR, "Unable to parse metadata: " + e.getCause() + "\n"
-					+ "Raw metadata:\n"
-					+ metadataResponse);
-			throw new InitializationException(e);
-		}
-		log(DEBUG, "Parsed metadata: " + metadata);
-		return metadata;
-	}
+    private static List<URLFilter> createFilters(APIMetadata config) {
+        if (Config.httpdDisabled) {
+            log(INFO, "Disabled local HTTP server");
+            return emptyList();
+        }
 
-	private static void warnIfHttp(String url) {
-		if (url.toLowerCase().startsWith("http://")) {
-			log(WARNING, "You are using HTTP protocol, which is INSECURE! Please switch to HTTPS if possible.");
-		}
-	}
+        List<URLFilter> filters = new ArrayList<>();
 
-	private static String addHttpsIfMissing(String url) {
-		String lowercased = url.toLowerCase();
-		if (!lowercased.startsWith("http://") && !lowercased.startsWith("https://")) {
-			url = "https://" + url;
-		}
-		return url;
-	}
+        YggdrasilClient customClient
+            = new YggdrasilClient(new CustomYggdrasilAPIProvider(config));
+        YggdrasilClient mojangClient
+            = new YggdrasilClient(new MojangYggdrasilAPIProvider(), Config.mojangProxy);
 
-	private static boolean urlEqualsIgnoreSlash(String a, String b) {
-		if (!a.endsWith("/"))
-			a += "/";
-		if (!b.endsWith("/"))
-			b += "/";
-		return a.equals(b);
-	}
+        boolean legacySkinPolyfillDefault
+            = !Boolean.TRUE.equals(config.getMeta().get("feature.legacy_skin_api"));
+        if (Config.legacySkinPolyfill.isEnabled(legacySkinPolyfillDefault)) {
+            filters.add(new LegacySkinAPIFilter(customClient));
+        } else {
+            log(INFO, "Disabled legacy skin API polyfill");
+        }
 
-	private static List<URLFilter> createFilters(APIMetadata config) {
-		if (Config.httpdDisabled) {
-			log(INFO, "Disabled local HTTP server");
-			return emptyList();
-		}
+        boolean mojangNamespaceDefault
+            = !Boolean.TRUE.equals(config.getMeta().get("feature.no_mojang_namespace"));
+        if (Config.mojangNamespace.isEnabled(mojangNamespaceDefault)) {
+            filters.add(new QueryUUIDsFilter(mojangClient, customClient));
+            filters.add(new QueryProfileFilter(mojangClient, customClient));
+        } else {
+            log(INFO, "Disabled Mojang namespace");
+        }
 
-		List<URLFilter> filters = new ArrayList<>();
+        boolean mojangAntiFeaturesDefault = Boolean.TRUE.equals(
+            config.getMeta().get("feature.enable_mojang_anti_features")
+        );
+        if (!Config.mojangAntiFeatures.isEnabled(mojangAntiFeaturesDefault)) {
+            filters.add(new AntiFeaturesFilter());
+        }
 
-		YggdrasilClient customClient = new YggdrasilClient(new CustomYggdrasilAPIProvider(config));
-		YggdrasilClient mojangClient = new YggdrasilClient(new MojangYggdrasilAPIProvider(), Config.mojangProxy);
+        boolean profileKeyDefault
+            = Boolean.TRUE.equals(config.getMeta().get("feature.enable_profile_key"));
+        if (!Config.profileKey.isEnabled(profileKeyDefault)) {
+            filters.add(new ProfileKeyFilter());
+        }
 
-		boolean legacySkinPolyfillDefault = !Boolean.TRUE.equals(config.getMeta().get("feature.legacy_skin_api"));
-		if (Config.legacySkinPolyfill.isEnabled(legacySkinPolyfillDefault)) {
-			filters.add(new LegacySkinAPIFilter(customClient));
-		} else {
-			log(INFO, "Disabled legacy skin API polyfill");
-		}
+        filters.add(new PublickeysFilter());
 
-		boolean mojangNamespaceDefault = !Boolean.TRUE.equals(config.getMeta().get("feature.no_mojang_namespace"));
-		if (Config.mojangNamespace.isEnabled(mojangNamespaceDefault)) {
-			filters.add(new QueryUUIDsFilter(mojangClient, customClient));
-			filters.add(new QueryProfileFilter(mojangClient, customClient));
-		} else {
-			log(INFO, "Disabled Mojang namespace");
-		}
+        return filters;
+    }
 
-		boolean mojangAntiFeaturesDefault = Boolean.TRUE.equals(config.getMeta().get("feature.enable_mojang_anti_features"));
-		if (!Config.mojangAntiFeatures.isEnabled(mojangAntiFeaturesDefault)) {
-			filters.add(new AntiFeaturesFilter());
-		}
+    private static ClassTransformer createTransformer(APIMetadata config) {
+        URLProcessor urlProcessor
+            = new URLProcessor(createFilters(config), new DefaultURLRedirector(config));
 
-		boolean profileKeyDefault = Boolean.TRUE.equals(config.getMeta().get("feature.enable_profile_key"));
-		if (!Config.profileKey.isEnabled(profileKeyDefault)) {
-			filters.add(new ProfileKeyFilter());
-		}
+        ClassTransformer transformer = new ClassTransformer();
+        transformer.setIgnores(Config.ignoredPackages);
 
-		filters.add(new PublickeysFilter());
+        if (Config.dumpClass) {
+            transformer.listeners.add(new DumpClassListener(Paths.get("").toAbsolutePath()
+            ));
+        }
 
-		return filters;
-	}
+        if (Config.authlibLogging) {
+            transformer.units.add(new AuthlibLogInterceptor());
+        }
 
-	private static ClassTransformer createTransformer(APIMetadata config) {
-		URLProcessor urlProcessor = new URLProcessor(createFilters(config), new DefaultURLRedirector(config));
-
-		ClassTransformer transformer = new ClassTransformer();
-		transformer.setIgnores(Config.ignoredPackages);
-
-		if (Config.dumpClass) {
-			transformer.listeners.add(new DumpClassListener(Paths.get("").toAbsolutePath()));
-		}
-
-		if (Config.authlibLogging) {
-			transformer.units.add(new AuthlibLogInterceptor());
-		}
-
-		transformer.units.add(new MainArgumentsTransformer());
-		transformer.units.add(new ConstantURLTransformUnit(urlProcessor));
-		transformer.units.add(new CitizensTransformer());
-		transformer.units.add(new ConcatenateURLTransformUnit());
+        transformer.units.add(new MainArgumentsTransformer());
+        transformer.units.add(new ConstantURLTransformUnit(urlProcessor));
+        transformer.units.add(new CitizensTransformer());
+        transformer.units.add(new ConcatenateURLTransformUnit());
         transformer.units.add(new UsernameLengthTransformer());
 
-		boolean usernameCheckDefault = Boolean.TRUE.equals(config.getMeta().get("feature.username_check"));
-		if (Config.usernameCheck.isEnabled(usernameCheckDefault)) {
-			log(INFO, "Username check is enforced");
-		} else {
-			transformer.units.add(new UsernameCharacterCheckTransformer());
-			transformer.units.add(new PaperUsernameCheckTransformer());
-			transformer.units.add(new BungeeCordAllowedCharactersTransformer());
-		}
+        boolean usernameCheckDefault
+            = Boolean.TRUE.equals(config.getMeta().get("feature.username_check"));
+        if (Config.usernameCheck.isEnabled(usernameCheckDefault)) {
+            log(INFO, "Username check is enforced");
+        } else {
+            transformer.units.add(new UsernameCharacterCheckTransformer());
+            transformer.units.add(new PaperUsernameCheckTransformer());
+            transformer.units.add(new BungeeCordAllowedCharactersTransformer());
+        }
 
-		transformer.units.add(new SkinWhitelistTransformUnit());
-		SkinWhitelistTransformUnit.getWhitelistedDomains().addAll(config.getSkinDomains());
+        transformer.units.add(new SkinWhitelistTransformUnit());
+        SkinWhitelistTransformUnit.getWhitelistedDomains().addAll(config.getSkinDomains()
+        );
 
-		transformer.units.add(new YggdrasilKeyTransformUnit());
-		config.getDecodedPublickey().ifPresent(YggdrasilKeyTransformUnit.PUBLIC_KEYS::add);
-		transformer.units.add(new VelocityProfileKeyTransformUnit());
-		transformer.units.add(new BungeeCordProfileKeyTransformUnit());
-		MainArgumentsTransformer.getArgumentsListeners().add(new AccountTypeTransformer()::transform);
-        MainArgumentsTransformer.getArgumentsListeners().add(new LoginArgumentsInjector());
+        transformer.units.add(new YggdrasilKeyTransformUnit());
+        config.getDecodedPublickey().ifPresent(YggdrasilKeyTransformUnit.PUBLIC_KEYS::add
+        );
+        transformer.units.add(new VelocityProfileKeyTransformUnit());
+        transformer.units.add(new BungeeCordProfileKeyTransformUnit());
+        MainArgumentsTransformer.getArgumentsListeners().add(new AccountTypeTransformer(
+        )::transform);
+        MainArgumentsTransformer.getArgumentsListeners().add(new LoginArgumentsInjector()
+        );
 
-		return transformer;
-	}
+        return transformer;
+    }
 
-	public static void retransformClasses(String... classNames) {
-		if (!retransformSupported) {
-			return;
-		}
-		Set<String> classNamesSet = new HashSet<>(Arrays.asList(classNames));
-		Class<?>[] classes = Stream.of(instrumentation.getAllLoadedClasses())
-				.filter(clazz -> classNamesSet.contains(clazz.getName()))
-				.filter(AuthlibInjector::canRetransformClass)
-				.toArray(Class[]::new);
-		if (classes.length > 0) {
-			log(INFO, "Attempt to retransform classes: " + Arrays.toString(classes));
-			try {
-				instrumentation.retransformClasses(classes);
-			} catch (Throwable e) {
-				log(WARNING, "Failed to retransform", e);
-			}
-		}
-	}
+    public static void retransformClasses(String... classNames) {
+        if (!retransformSupported) {
+            return;
+        }
+        Set<String> classNamesSet = new HashSet<>(Arrays.asList(classNames));
+        Class<?>[] classes = Stream.of(instrumentation.getAllLoadedClasses())
+                                 .filter(clazz -> classNamesSet.contains(clazz.getName()))
+                                 .filter(AuthlibInjector::canRetransformClass)
+                                 .toArray(Class[] ::new);
+        if (classes.length > 0) {
+            log(INFO, "Attempt to retransform classes: " + Arrays.toString(classes));
+            try {
+                instrumentation.retransformClasses(classes);
+            } catch (Throwable e) {
+                log(WARNING, "Failed to retransform", e);
+            }
+        }
+    }
 
-	public static void retransformAllClasses() {
-		if (!retransformSupported) {
-			return;
-		}
-		log(INFO, "Attempt to retransform all classes");
-		long t0 = System.currentTimeMillis();
+    public static void retransformAllClasses() {
+        if (!retransformSupported) {
+            return;
+        }
+        log(INFO, "Attempt to retransform all classes");
+        long t0 = System.currentTimeMillis();
 
-		Class<?>[] classes = Stream.of(instrumentation.getAllLoadedClasses())
-				.filter(AuthlibInjector::canRetransformClass)
-				.toArray(Class[]::new);
-		if (classes.length > 0) {
-			try {
-				instrumentation.retransformClasses(classes);
-			} catch (Throwable e) {
-				log(WARNING, "Failed to retransform", e);
-				return;
-			}
-		}
+        Class<?>[] classes = Stream.of(instrumentation.getAllLoadedClasses())
+                                 .filter(AuthlibInjector::canRetransformClass)
+                                 .toArray(Class[] ::new);
+        if (classes.length > 0) {
+            try {
+                instrumentation.retransformClasses(classes);
+            } catch (Throwable e) {
+                log(WARNING, "Failed to retransform", e);
+                return;
+            }
+        }
 
-		long t1 = System.currentTimeMillis();
-		log(INFO, "Retransformed " + classes.length + " classes in " + (t1 - t0) + "ms");
-	}
+        long t1 = System.currentTimeMillis();
+        log(INFO, "Retransformed " + classes.length + " classes in " + (t1 - t0) + "ms");
+    }
 
-	private static boolean canRetransformClass(Class<?> clazz) {
-		if (!instrumentation.isModifiableClass(clazz)) {
-			return false;
-		}
-		String name = clazz.getName();
-		for (String prefix : Config.ignoredPackages) {
-			if (name.startsWith(prefix)) {
-				return false;
-			}
-		}
-		return true;
-	}
+    private static boolean canRetransformClass(Class<?> clazz) {
+        if (!instrumentation.isModifiableClass(clazz)) {
+            return false;
+        }
+        String name = clazz.getName();
+        for (String prefix : Config.ignoredPackages) {
+            if (name.startsWith(prefix)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
-	public static ClassTransformer getClassTransformer() {
-		return classTransformer;
-	}
+    public static ClassTransformer getClassTransformer() {
+        return classTransformer;
+    }
 }

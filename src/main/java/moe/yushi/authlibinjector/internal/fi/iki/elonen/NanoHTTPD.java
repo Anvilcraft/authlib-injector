@@ -71,259 +71,271 @@ import moe.yushi.authlibinjector.internal.fi.iki.elonen.HTTPSession.ConnectionCl
  * Copyright (c) 2012-2013 by Paul S. Hawke, 2001,2005-2013 by Jarno Elonen,
  * 2010 by Konstantinos Togias
  * </p>
- * See the separate "META-INF/licenses/nanohttpd.txt" file for the distribution license (Modified BSD licence)
+ * See the separate "META-INF/licenses/nanohttpd.txt" file for the distribution license
+ * (Modified BSD licence)
  */
 public abstract class NanoHTTPD {
+    /**
+     * The runnable that will be used for every new client connection.
+     */
+    private class ClientHandler implements Runnable {
+        private final InputStream inputStream;
 
-	/**
-	 * The runnable that will be used for every new client connection.
-	 */
-	private class ClientHandler implements Runnable {
+        private final Socket acceptSocket;
 
-		private final InputStream inputStream;
+        public ClientHandler(InputStream inputStream, Socket acceptSocket) {
+            this.inputStream = inputStream;
+            this.acceptSocket = acceptSocket;
+        }
 
-		private final Socket acceptSocket;
+        public void close() {
+            safeClose(this.inputStream);
+            safeClose(this.acceptSocket);
+        }
 
-		public ClientHandler(InputStream inputStream, Socket acceptSocket) {
-			this.inputStream = inputStream;
-			this.acceptSocket = acceptSocket;
-		}
+        @Override
+        public void run() {
+            OutputStream outputStream = null;
+            try {
+                outputStream = this.acceptSocket.getOutputStream();
+                HTTPSession session = new HTTPSession(
+                    this.inputStream,
+                    outputStream,
+                    (InetSocketAddress) this.acceptSocket.getRemoteSocketAddress()
+                );
+                while (!this.acceptSocket.isClosed()) {
+                    session.execute(NanoHTTPD.this::serve);
+                }
+            } catch (ConnectionCloseException e) {
+                // When the socket is closed by the client,
+                // we throw our own ConnectionCloseException
+                // to break the "keep alive" loop above. If
+                // the exception was anything other
+                // than the expected SocketException OR a
+                // SocketTimeoutException, print the
+                // stacktrace
+            } catch (Exception e) {
+                log(ERROR,
+                    "Communication with the client broken, or an bug in the handler code",
+                    e);
+            } finally {
+                safeClose(outputStream);
+                safeClose(this.inputStream);
+                safeClose(this.acceptSocket);
+                NanoHTTPD.this.asyncRunner.closed(this);
+            }
+        }
+    }
 
-		public void close() {
-			safeClose(this.inputStream);
-			safeClose(this.acceptSocket);
-		}
+    /**
+     * Default threading strategy for NanoHTTPD.
+     * <p/>
+     * <p>
+     * By default, the server spawns a new Thread for every incoming request.
+     * These are set to <i>daemon</i> status, and named according to the request
+     * number. The name is useful when profiling the application.
+     * </p>
+     */
+    private static class AsyncRunner {
+        private final AtomicLong requestCount = new AtomicLong();
+        private final List<ClientHandler> running = new CopyOnWriteArrayList<>();
 
-		@Override
-		public void run() {
-			OutputStream outputStream = null;
-			try {
-				outputStream = this.acceptSocket.getOutputStream();
-				HTTPSession session = new HTTPSession(this.inputStream, outputStream, (InetSocketAddress) this.acceptSocket.getRemoteSocketAddress());
-				while (!this.acceptSocket.isClosed()) {
-					session.execute(NanoHTTPD.this::serve);
-				}
-			} catch (ConnectionCloseException e) {
-				// When the socket is closed by the client,
-				// we throw our own ConnectionCloseException
-				// to break the "keep alive" loop above. If
-				// the exception was anything other
-				// than the expected SocketException OR a
-				// SocketTimeoutException, print the
-				// stacktrace
-			} catch (Exception e) {
-				log(ERROR, "Communication with the client broken, or an bug in the handler code", e);
-			} finally {
-				safeClose(outputStream);
-				safeClose(this.inputStream);
-				safeClose(this.acceptSocket);
-				NanoHTTPD.this.asyncRunner.closed(this);
-			}
-		}
-	}
+        public void closeAll() {
+            for (ClientHandler clientHandler : this.running) {
+                clientHandler.close();
+            }
+        }
 
-	/**
-	 * Default threading strategy for NanoHTTPD.
-	 * <p/>
-	 * <p>
-	 * By default, the server spawns a new Thread for every incoming request.
-	 * These are set to <i>daemon</i> status, and named according to the request
-	 * number. The name is useful when profiling the application.
-	 * </p>
-	 */
-	private static class AsyncRunner {
+        public void closed(ClientHandler clientHandler) {
+            this.running.remove(clientHandler);
+        }
 
-		private final AtomicLong requestCount = new AtomicLong();
-		private final List<ClientHandler> running = new CopyOnWriteArrayList<>();
+        public void exec(ClientHandler clientHandler) {
+            Thread t = new Thread(clientHandler);
+            t.setDaemon(true);
+            t.setName(
+                "NanoHttpd Request Processor (#" + this.requestCount.incrementAndGet()
+                + ")"
+            );
+            this.running.add(clientHandler);
+            t.start();
+        }
+    }
 
-		public void closeAll() {
-			for (ClientHandler clientHandler : this.running) {
-				clientHandler.close();
-			}
-		}
+    /**
+     * The runnable that will be used for the main listening thread.
+     */
+    private class ServerRunnable implements Runnable {
+        /**
+         * Maximum time to wait on Socket.getInputStream().read() (in milliseconds)
+         * This is required as the Keep-Alive HTTP connections would otherwise block
+         * the socket reading thread forever (or as long the browser is open).
+         */
+        private static final int SOCKET_READ_TIMEOUT = 5000;
 
-		public void closed(ClientHandler clientHandler) {
-			this.running.remove(clientHandler);
-		}
+        private IOException bindException;
 
-		public void exec(ClientHandler clientHandler) {
-			Thread t = new Thread(clientHandler);
-			t.setDaemon(true);
-			t.setName("NanoHttpd Request Processor (#" + this.requestCount.incrementAndGet() + ")");
-			this.running.add(clientHandler);
-			t.start();
-		}
-	}
+        private boolean hasBinded = false;
 
-	/**
-	 * The runnable that will be used for the main listening thread.
-	 */
-	private class ServerRunnable implements Runnable {
+        @Override
+        public void run() {
+            try {
+                serverSocket.bind(
+                    hostname != null ? new InetSocketAddress(hostname, port)
+                                     : new InetSocketAddress(port)
+                );
+                hasBinded = true;
+            } catch (IOException e) {
+                this.bindException = e;
+                return;
+            }
+            do {
+                try {
+                    @SuppressWarnings("resource")
+                    final Socket finalAccept = NanoHTTPD.this.serverSocket.accept();
+                    finalAccept.setSoTimeout(SOCKET_READ_TIMEOUT);
+                    @SuppressWarnings("resource")
+                    final InputStream inputStream = finalAccept.getInputStream();
+                    NanoHTTPD.this.asyncRunner.exec(
+                        new ClientHandler(inputStream, finalAccept)
+                    );
+                } catch (IOException e) {
+                    log(DEBUG, "Communication with the client broken", e);
+                }
+            } while (!NanoHTTPD.this.serverSocket.isClosed());
+        }
+    }
 
-		/**
-		 * Maximum time to wait on Socket.getInputStream().read() (in milliseconds)
-		 * This is required as the Keep-Alive HTTP connections would otherwise block
-		 * the socket reading thread forever (or as long the browser is open).
-		 */
-		private static final int SOCKET_READ_TIMEOUT = 5000;
+    static final void safeClose(Object closeable) {
+        try {
+            if (closeable != null) {
+                if (closeable instanceof Closeable) {
+                    ((Closeable) closeable).close();
+                } else if (closeable instanceof Socket) {
+                    ((Socket) closeable).close();
+                } else if (closeable instanceof ServerSocket) {
+                    ((ServerSocket) closeable).close();
+                } else {
+                    throw new IllegalArgumentException("Unknown object to close");
+                }
+            }
+        } catch (IOException e) {
+            log(ERROR, "Could not close", e);
+        }
+    }
 
-		private IOException bindException;
+    private final String hostname;
+    private final int port;
 
-		private boolean hasBinded = false;
+    private volatile ServerSocket serverSocket;
+    private Thread listenerThread;
 
-		@Override
-		public void run() {
-			try {
-				serverSocket.bind(hostname != null ? new InetSocketAddress(hostname, port) : new InetSocketAddress(port));
-				hasBinded = true;
-			} catch (IOException e) {
-				this.bindException = e;
-				return;
-			}
-			do {
-				try {
-					@SuppressWarnings("resource")
-					final Socket finalAccept = NanoHTTPD.this.serverSocket.accept();
-					finalAccept.setSoTimeout(SOCKET_READ_TIMEOUT);
-					@SuppressWarnings("resource")
-					final InputStream inputStream = finalAccept.getInputStream();
-					NanoHTTPD.this.asyncRunner.exec(new ClientHandler(inputStream, finalAccept));
-				} catch (IOException e) {
-					log(DEBUG, "Communication with the client broken", e);
-				}
-			} while (!NanoHTTPD.this.serverSocket.isClosed());
-		}
-	}
+    private final AsyncRunner asyncRunner = new AsyncRunner();
 
-	static final void safeClose(Object closeable) {
-		try {
-			if (closeable != null) {
-				if (closeable instanceof Closeable) {
-					((Closeable) closeable).close();
-				} else if (closeable instanceof Socket) {
-					((Socket) closeable).close();
-				} else if (closeable instanceof ServerSocket) {
-					((ServerSocket) closeable).close();
-				} else {
-					throw new IllegalArgumentException("Unknown object to close");
-				}
-			}
-		} catch (IOException e) {
-			log(ERROR, "Could not close", e);
-		}
-	}
+    /**
+     * Constructs an HTTP server on given port.
+     */
+    public NanoHTTPD(int port) {
+        this(null, port);
+    }
 
-	private final String hostname;
-	private final int port;
+    // -------------------------------------------------------------------------------
+    // //
+    //
+    // Threading Strategy.
+    //
+    // -------------------------------------------------------------------------------
+    // //
 
-	private volatile ServerSocket serverSocket;
-	private Thread listenerThread;
+    /**
+     * Constructs an HTTP server on given hostname and port.
+     */
+    public NanoHTTPD(String hostname, int port) {
+        this.hostname = hostname;
+        this.port = port;
+    }
 
-	private final AsyncRunner asyncRunner = new AsyncRunner();
+    public final int getListeningPort() {
+        return this.serverSocket == null ? -1 : this.serverSocket.getLocalPort();
+    }
 
-	/**
-	 * Constructs an HTTP server on given port.
-	 */
-	public NanoHTTPD(int port) {
-		this(null, port);
-	}
+    public final boolean isAlive() {
+        return wasStarted() && !this.serverSocket.isClosed()
+            && this.listenerThread.isAlive();
+    }
 
-	// -------------------------------------------------------------------------------
-	// //
-	//
-	// Threading Strategy.
-	//
-	// -------------------------------------------------------------------------------
-	// //
+    public String getHostname() {
+        return hostname;
+    }
 
-	/**
-	 * Constructs an HTTP server on given hostname and port.
-	 */
-	public NanoHTTPD(String hostname, int port) {
-		this.hostname = hostname;
-		this.port = port;
-	}
+    /**
+     * Override this to customize the server.
+     * <p/>
+     * <p/>
+     * (By default, this returns a 404 "Not Found" plain text error response.)
+     *
+     * @param session
+     *                The HTTP session
+     * @return HTTP response, see class Response for details
+     */
+    public Response serve(IHTTPSession session) {
+        return Response.newFixedLength(Status.NOT_FOUND, CONTENT_TYPE_TEXT, "Not Found");
+    }
 
-	public final int getListeningPort() {
-		return this.serverSocket == null ? -1 : this.serverSocket.getLocalPort();
-	}
+    /**
+     * Starts the server in daemon mode.
+     */
+    public void start() throws IOException {
+        start(true);
+    }
 
-	public final boolean isAlive() {
-		return wasStarted() && !this.serverSocket.isClosed() && this.listenerThread.isAlive();
-	}
+    /**
+     * Start the server.
+     *
+     * @param daemon
+     *                start the thread daemon or not.
+     * @throws IOException
+     *                     if the socket is in use.
+     */
+    public void start(boolean daemon) throws IOException {
+        this.serverSocket = new ServerSocket();
+        this.serverSocket.setReuseAddress(true);
 
-	public String getHostname() {
-		return hostname;
-	}
+        ServerRunnable serverRunnable = new ServerRunnable();
+        this.listenerThread = new Thread(serverRunnable);
+        this.listenerThread.setDaemon(daemon);
+        this.listenerThread.setName("NanoHttpd Main Listener");
+        this.listenerThread.start();
+        while (!serverRunnable.hasBinded && serverRunnable.bindException == null) {
+            try {
+                Thread.sleep(10L);
+            } catch (Throwable e) {
+                // on android this may not be allowed, that's why we
+                // catch throwable the wait should be very short because we are
+                // just waiting for the bind of the socket
+            }
+        }
+        if (serverRunnable.bindException != null) {
+            throw serverRunnable.bindException;
+        }
+    }
 
-	/**
-	 * Override this to customize the server.
-	 * <p/>
-	 * <p/>
-	 * (By default, this returns a 404 "Not Found" plain text error response.)
-	 *
-	 * @param session
-	 *                The HTTP session
-	 * @return HTTP response, see class Response for details
-	 */
-	public Response serve(IHTTPSession session) {
-		return Response.newFixedLength(Status.NOT_FOUND, CONTENT_TYPE_TEXT, "Not Found");
-	}
+    /**
+     * Stop the server.
+     */
+    public void stop() {
+        try {
+            safeClose(this.serverSocket);
+            this.asyncRunner.closeAll();
+            if (this.listenerThread != null) {
+                this.listenerThread.join();
+            }
+        } catch (Exception e) {
+            log(ERROR, "Could not stop all connections", e);
+        }
+    }
 
-	/**
-	 * Starts the server in daemon mode.
-	 */
-	public void start() throws IOException {
-		start(true);
-	}
-
-	/**
-	 * Start the server.
-	 *
-	 * @param daemon
-	 *                start the thread daemon or not.
-	 * @throws IOException
-	 *                     if the socket is in use.
-	 */
-	public void start(boolean daemon) throws IOException {
-		this.serverSocket = new ServerSocket();
-		this.serverSocket.setReuseAddress(true);
-
-		ServerRunnable serverRunnable = new ServerRunnable();
-		this.listenerThread = new Thread(serverRunnable);
-		this.listenerThread.setDaemon(daemon);
-		this.listenerThread.setName("NanoHttpd Main Listener");
-		this.listenerThread.start();
-		while (!serverRunnable.hasBinded && serverRunnable.bindException == null) {
-			try {
-				Thread.sleep(10L);
-			} catch (Throwable e) {
-				// on android this may not be allowed, that's why we
-				// catch throwable the wait should be very short because we are
-				// just waiting for the bind of the socket
-			}
-		}
-		if (serverRunnable.bindException != null) {
-			throw serverRunnable.bindException;
-		}
-	}
-
-	/**
-	 * Stop the server.
-	 */
-	public void stop() {
-		try {
-			safeClose(this.serverSocket);
-			this.asyncRunner.closeAll();
-			if (this.listenerThread != null) {
-				this.listenerThread.join();
-			}
-		} catch (Exception e) {
-			log(ERROR, "Could not stop all connections", e);
-		}
-	}
-
-	public final boolean wasStarted() {
-		return this.serverSocket != null && this.listenerThread != null;
-	}
+    public final boolean wasStarted() {
+        return this.serverSocket != null && this.listenerThread != null;
+    }
 }

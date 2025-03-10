@@ -23,59 +23,81 @@ import org.objectweb.asm.Handle;
 import org.objectweb.asm.MethodVisitor;
 
 public abstract class LdcTransformUnit implements TransformUnit {
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        boolean matched = false;
+        for (String constant : ctx.getStringConstants()) {
+            Optional<String> transformed = transformLdc(constant);
+            if (transformed.isPresent() && !transformed.get().equals(constant)) {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched)
+            return Optional.empty();
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		boolean matched = false;
-		for (String constant : ctx.getStringConstants()) {
-			Optional<String> transformed = transformLdc(constant);
-			if (transformed.isPresent() && !transformed.get().equals(constant)) {
-				matched = true;
-				break;
-			}
-		}
-		if (!matched)
-			return Optional.empty();
+        return Optional.of(new ClassVisitor(ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(
+                int access,
+                String name,
+                String desc,
+                String signature,
+                String[] exceptions
+            ) {
+                return new MethodVisitor(
+                    ASM9, super.visitMethod(access, name, desc, signature, exceptions)
+                ) {
+                    @Override
+                    public void visitLdcInsn(Object cst) {
+                        if (cst instanceof String) {
+                            Optional<String> transformed = transformLdc((String) cst);
+                            if (transformed.isPresent()
+                                && !transformed.get().equals(cst)) {
+                                ctx.markModified();
+                                super.visitLdcInsn(transformed.get());
+                            } else {
+                                super.visitLdcInsn(cst);
+                            }
+                        } else {
+                            super.visitLdcInsn(cst);
+                        }
+                    }
 
-		return Optional.of(new ClassVisitor(ASM9, writer) {
+                    @Override
+                    public void visitInvokeDynamicInsn(
+                        String name,
+                        String descriptor,
+                        Handle bootstrapMethodHandle,
+                        Object... bootstrapMethodArguments
+                    ) {
+                        for (int i = 0; i < bootstrapMethodArguments.length; i++) {
+                            if (bootstrapMethodArguments[i] instanceof String) {
+                                String constant = (String) bootstrapMethodArguments[i];
+                                Optional<String> transformed = transformLdc(constant);
+                                if (transformed.isPresent()
+                                    && !transformed.get().equals(constant)) {
+                                    ctx.markModified();
+                                    bootstrapMethodArguments[i] = transformed.get();
+                                }
+                            }
+                        }
+                        super.visitInvokeDynamicInsn(
+                            name,
+                            descriptor,
+                            bootstrapMethodHandle,
+                            bootstrapMethodArguments
+                        );
+                    }
+                };
+            }
+        });
+    }
 
-			@Override
-			public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-				return new MethodVisitor(ASM9, super.visitMethod(access, name, desc, signature, exceptions)) {
-
-					@Override
-					public void visitLdcInsn(Object cst) {
-						if (cst instanceof String) {
-							Optional<String> transformed = transformLdc((String) cst);
-							if (transformed.isPresent() && !transformed.get().equals(cst)) {
-								ctx.markModified();
-								super.visitLdcInsn(transformed.get());
-							} else {
-								super.visitLdcInsn(cst);
-							}
-						} else {
-							super.visitLdcInsn(cst);
-						}
-					}
-
-					@Override
-					public void visitInvokeDynamicInsn(String name, String descriptor, Handle bootstrapMethodHandle, Object... bootstrapMethodArguments) {
-						for (int i = 0; i < bootstrapMethodArguments.length; i++) {
-							if (bootstrapMethodArguments[i] instanceof String) {
-								String constant = (String) bootstrapMethodArguments[i];
-								Optional<String> transformed = transformLdc(constant);
-								if (transformed.isPresent() && !transformed.get().equals(constant)) {
-									ctx.markModified();
-									bootstrapMethodArguments[i] = transformed.get();
-								}
-							}
-						}
-						super.visitInvokeDynamicInsn(name, descriptor, bootstrapMethodHandle, bootstrapMethodArguments);
-					}
-				};
-			}
-		});
-	}
-
-	protected abstract Optional<String> transformLdc(String input);
+    protected abstract Optional<String> transformLdc(String input);
 }

@@ -21,29 +21,28 @@ import moe.yushi.authlibinjector.APIMetadata;
 import moe.yushi.authlibinjector.util.Logging.Level;
 
 public final class AuthServerNameInjector {
-	private AuthServerNameInjector() {}
+    private AuthServerNameInjector() {}
 
-	private static String getServerName(APIMetadata meta) {
-		Object serverName = meta.getMeta().get("serverName");
-		if (serverName instanceof String) {
-			return (String) serverName;
-		} else {
-			return meta.getApiRoot();
-		}
-	}
+    private static String getServerName(APIMetadata meta) {
+        Object serverName = meta.getMeta().get("serverName");
+        if (serverName instanceof String) {
+            return (String) serverName;
+        } else {
+            return meta.getApiRoot();
+        }
+    }
 
-	public static void init(APIMetadata meta) {
-		MainArgumentsTransformer.getArgumentsListeners().add(args -> {
-			for (int i = 0; i < args.length - 1; i++) {
-				if ("--versionType".equals(args[i])) {
-					String serverName = getServerName(meta);
-					log(Level.DEBUG, "Setting versionType to server name: " + serverName);
-					args[i + 1] = serverName;
-					break;
-				}
-			}
-			return args;
-		});
-	}
-
+    public static void init(APIMetadata meta) {
+        MainArgumentsTransformer.getArgumentsListeners().add(args -> {
+            for (int i = 0; i < args.length - 1; i++) {
+                if ("--versionType".equals(args[i])) {
+                    String serverName = getServerName(meta);
+                    log(Level.DEBUG, "Setting versionType to server name: " + serverName);
+                    args[i + 1] = serverName;
+                    break;
+                }
+            }
+            return args;
+        });
+    }
 }

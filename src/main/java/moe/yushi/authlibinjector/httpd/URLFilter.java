@@ -26,16 +26,17 @@ import moe.yushi.authlibinjector.internal.fi.iki.elonen.Response;
  * A URLFilter filters the URLs in the bytecode, and intercepts those it is interested in.
  */
 public interface URLFilter {
+    /**
+     * Returns true if the filter MAY be interested in the given domain.
+     *
+     * If this method returns true, the domain will be intercepted.
+     * And when a request is sent to this domain, handle() will be invoked.
+     * If it turns out that the filter doesn't really want to intercept the URL (handle()
+     * returns empty), the request will be reverse-proxied to the original URL, as if
+     * nothing has happened.
+     */
+    boolean canHandle(String domain);
 
-	/**
-	 * Returns true if the filter MAY be interested in the given domain.
-	 *
-	 * If this method returns true, the domain will be intercepted.
-	 * And when a request is sent to this domain, handle() will be invoked.
-	 * If it turns out that the filter doesn't really want to intercept the URL (handle() returns empty),
-	 * the request will be reverse-proxied to the original URL, as if nothing has happened.
-	 */
-	boolean canHandle(String domain);
-
-	Optional<Response> handle(String domain, String path, IHTTPSession session) throws IOException;
+    Optional<Response> handle(String domain, String path, IHTTPSession session)
+        throws IOException;
 }

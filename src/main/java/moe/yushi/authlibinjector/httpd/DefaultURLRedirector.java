@@ -22,32 +22,30 @@ import java.util.Optional;
 import moe.yushi.authlibinjector.APIMetadata;
 
 public class DefaultURLRedirector implements URLRedirector {
+    private Map<String, String> domainMapping = new HashMap<>();
+    private String apiRoot;
 
-	private Map<String, String> domainMapping = new HashMap<>();
-	private String apiRoot;
+    public DefaultURLRedirector(APIMetadata config) {
+        initDomainMapping();
 
-	public DefaultURLRedirector(APIMetadata config) {
-		initDomainMapping();
+        apiRoot = config.getApiRoot();
+    }
 
-		apiRoot = config.getApiRoot();
-	}
+    private void initDomainMapping() {
+        domainMapping.put("api.mojang.com", "api");
+        domainMapping.put("authserver.mojang.com", "authserver");
+        domainMapping.put("sessionserver.mojang.com", "sessionserver");
+        domainMapping.put("skins.minecraft.net", "skins");
+        domainMapping.put("api.minecraftservices.com", "minecraftservices");
+    }
 
-	private void initDomainMapping() {
-		domainMapping.put("api.mojang.com", "api");
-		domainMapping.put("authserver.mojang.com", "authserver");
-		domainMapping.put("sessionserver.mojang.com", "sessionserver");
-		domainMapping.put("skins.minecraft.net", "skins");
-		domainMapping.put("api.minecraftservices.com", "minecraftservices");
-	}
+    @Override
+    public Optional<String> redirect(String domain, String path) {
+        String subdirectory = domainMapping.get(domain);
+        if (subdirectory == null) {
+            return Optional.empty();
+        }
 
-	@Override
-	public Optional<String> redirect(String domain, String path) {
-		String subdirectory = domainMapping.get(domain);
-		if (subdirectory == null) {
-			return Optional.empty();
-		}
-
-		return Optional.of(apiRoot + subdirectory + path);
-	}
-
+        return Optional.of(apiRoot + subdirectory + path);
+    }
 }

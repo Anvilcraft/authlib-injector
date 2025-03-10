@@ -27,39 +27,57 @@ import moe.yushi.authlibinjector.transform.TransformUnit;
 
 /**
  * Hacks BungeeCord to bypass profile key signature validation.
- * See https://github.com/SpigotMC/BungeeCord/commit/78ca16dfe3bf9a21d5c054a1884d4f5f198a62bc .
+ * See
+ * https://github.com/SpigotMC/BungeeCord/commit/78ca16dfe3bf9a21d5c054a1884d4f5f198a62bc
+ * .
  */
 public class BungeeCordProfileKeyTransformUnit implements TransformUnit {
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext ctx
+    ) {
+        if ("net.md_5.bungee.EncryptionUtil".equals(className)) {
+            return Optional.of(
+                new ClassVisitor(ASM9, writer) {
+                    @Override
+                    public MethodVisitor visitMethod(
+                        int access,
+                        String name,
+                        String descriptor,
+                        String signature,
+                        String[] exceptions
+                    ) {
+                        if ("check".equals(name) && "(Lnet/md_5/bungee/protocol/PlayerPublicKey;Ljava/util/UUID;)Z".equals(descriptor)) {
+                            ctx.markModified();
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext ctx) {
-		if ("net.md_5.bungee.EncryptionUtil".equals(className)) {
-			return Optional.of(new ClassVisitor(ASM9, writer) {
-				@Override
-				public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-					if ("check".equals(name) && "(Lnet/md_5/bungee/protocol/PlayerPublicKey;Ljava/util/UUID;)Z".equals(descriptor)) {
-						ctx.markModified();
+                            MethodVisitor mv = super.visitMethod(
+                                access, name, descriptor, signature, exceptions
+                            );
+                            mv.visitCode();
+                            mv.visitInsn(ICONST_1);
+                            mv.visitInsn(IRETURN);
+                            mv.visitMaxs(-1, -1);
+                            mv.visitEnd();
 
-						MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-						mv.visitCode();
-						mv.visitInsn(ICONST_1);
-						mv.visitInsn(IRETURN);
-						mv.visitMaxs(-1, -1);
-						mv.visitEnd();
+                            return null;
+                        } else {
+                            return super.visitMethod(
+                                access, name, descriptor, signature, exceptions
+                            );
+                        }
+                    }
+                }
+            );
+        } else {
+            return Optional.empty();
+        }
+    }
 
-						return null;
-					} else {
-						return super.visitMethod(access, name, descriptor, signature, exceptions);
-					}
-				}
-			});
-		} else {
-			return Optional.empty();
-		}
-	}
-
-	@Override
-	public String toString() {
-		return "BungeeCord Profile Key Transformer";
-	}
+    @Override
+    public String toString() {
+        return "BungeeCord Profile Key Transformer";
+    }
 }

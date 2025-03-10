@@ -43,107 +43,114 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * A JSON object. Key value pairs are unordered. JSONObject supports java.util.Map interface.
+ * A JSON object. Key value pairs are unordered. JSONObject supports java.util.Map
+ * interface.
  *
  * @author FangYidong<fangyidong@yahoo.com.cn>
  */
-public class JSONObject extends LinkedHashMap<String, Object> implements JSONAware, JSONStreamAware {
+public class JSONObject
+    extends LinkedHashMap<String, Object> implements JSONAware, JSONStreamAware {
+    public JSONObject() {
+        super();
+    }
 
-	public JSONObject() {
-		super();
-	}
+    /**
+     * Allows creation of a JSONObject from a Map. After that, both the
+     * generated JSONObject and the Map can be modified independently.
+     *
+     * @param map
+     */
+    public JSONObject(Map<String, ?> map) {
+        super(map);
+    }
 
-	/**
-	 * Allows creation of a JSONObject from a Map. After that, both the
-	 * generated JSONObject and the Map can be modified independently.
-	 *
-	 * @param map
-	 */
-	public JSONObject(Map<String, ?> map) {
-		super(map);
-	}
+    /**
+     * Encode a map into JSON text and write it to out.
+     * If this map is also a JSONAware or JSONStreamAware, JSONAware or JSONStreamAware
+     * specific behaviours will be ignored at this top level.
+     *
+     * @see
+     *     moe.yushi.authlibinjector.internal.org.json.simple.JSONValue#writeJSONString(Object,
+     *     Writer)
+     *
+     * @param map
+     * @param out
+     */
+    public static void writeJSONString(Map<String, ?> map, Writer out)
+        throws IOException {
+        if (map == null) {
+            out.write("null");
+            return;
+        }
 
-	/**
-	 * Encode a map into JSON text and write it to out.
-	 * If this map is also a JSONAware or JSONStreamAware, JSONAware or JSONStreamAware specific behaviours will be ignored at this top level.
-	 *
-	 * @see moe.yushi.authlibinjector.internal.org.json.simple.JSONValue#writeJSONString(Object, Writer)
-	 *
-	 * @param map
-	 * @param out
-	 */
-	public static void writeJSONString(Map<String, ?> map, Writer out) throws IOException {
-		if (map == null) {
-			out.write("null");
-			return;
-		}
+        boolean first = true;
+        Iterator<? extends Map.Entry<String, ?>> iter = map.entrySet().iterator();
 
-		boolean first = true;
-		Iterator<? extends Map.Entry<String, ?>> iter = map.entrySet().iterator();
+        out.write('{');
+        while (iter.hasNext()) {
+            if (first)
+                first = false;
+            else
+                out.write(',');
+            Map.Entry<String, ?> entry = iter.next();
+            out.write('\"');
+            out.write(JSONValue.escape(entry.getKey()));
+            out.write('\"');
+            out.write(':');
+            JSONValue.writeJSONString(entry.getValue(), out);
+        }
+        out.write('}');
+    }
 
-		out.write('{');
-		while (iter.hasNext()) {
-			if (first)
-				first = false;
-			else
-				out.write(',');
-			Map.Entry<String, ?> entry = iter.next();
-			out.write('\"');
-			out.write(JSONValue.escape(entry.getKey()));
-			out.write('\"');
-			out.write(':');
-			JSONValue.writeJSONString(entry.getValue(), out);
-		}
-		out.write('}');
-	}
+    @Override
+    public void writeJSONString(Writer out) throws IOException {
+        writeJSONString(this, out);
+    }
 
-	@Override
-	public void writeJSONString(Writer out) throws IOException {
-		writeJSONString(this, out);
-	}
+    /**
+     * Convert a map to JSON text. The result is a JSON object.
+     * If this map is also a JSONAware, JSONAware specific behaviours will be omitted at
+     * this top level.
+     *
+     * @see
+     *     moe.yushi.authlibinjector.internal.org.json.simple.JSONValue#toJSONString(Object)
+     *
+     * @param map
+     * @return JSON text, or "null" if map is null.
+     */
+    public static String toJSONString(Map<String, ?> map) {
+        final StringWriter writer = new StringWriter();
 
-	/**
-	 * Convert a map to JSON text. The result is a JSON object.
-	 * If this map is also a JSONAware, JSONAware specific behaviours will be omitted at this top level.
-	 *
-	 * @see moe.yushi.authlibinjector.internal.org.json.simple.JSONValue#toJSONString(Object)
-	 *
-	 * @param map
-	 * @return JSON text, or "null" if map is null.
-	 */
-	public static String toJSONString(Map<String, ?> map) {
-		final StringWriter writer = new StringWriter();
+        try {
+            writeJSONString(map, writer);
+            return writer.toString();
+        } catch (IOException e) {
+            // This should never happen with a StringWriter
+            throw new RuntimeException(e);
+        }
+    }
 
-		try {
-			writeJSONString(map, writer);
-			return writer.toString();
-		} catch (IOException e) {
-			// This should never happen with a StringWriter
-			throw new RuntimeException(e);
-		}
-	}
+    @Override
+    public String toJSONString() {
+        return toJSONString(this);
+    }
 
-	@Override
-	public String toJSONString() {
-		return toJSONString(this);
-	}
+    @Override
+    public String toString() {
+        return toJSONString();
+    }
 
-	@Override
-	public String toString() {
-		return toJSONString();
-	}
+    public static String toString(String key, Object value) {
+        StringBuffer sb = new StringBuffer();
+        sb.append('\"');
+        if (key == null)
+            sb.append("null");
+        else
+            JSONValue.escape(key, sb);
+        sb.append('\"').append(':');
 
-	public static String toString(String key, Object value) {
-		StringBuffer sb = new StringBuffer();
-		sb.append('\"');
-		if (key == null)
-			sb.append("null");
-		else
-			JSONValue.escape(key, sb);
-		sb.append('\"').append(':');
+        sb.append(JSONValue.toJSONString(value));
 
-		sb.append(JSONValue.toJSONString(value));
-
-		return sb.toString();
-	}
+        return sb.toString();
+    }
 }

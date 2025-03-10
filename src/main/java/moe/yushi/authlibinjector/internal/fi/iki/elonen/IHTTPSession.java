@@ -57,31 +57,29 @@ import java.util.Map;
  * response.
  */
 public interface IHTTPSession {
+    InetSocketAddress getRemoteAddress();
 
-	InetSocketAddress getRemoteAddress();
+    String getMethod();
 
-	String getMethod();
+    /**
+     * @return the path part of the URL.
+     */
+    String getUri();
 
-	/**
-	 * @return the path part of the URL.
-	 */
-	String getUri();
+    /**
+     * @return raw query string, null if no query exists
+     */
+    String getQueryParameterString();
 
-	/**
-	 * @return raw query string, null if no query exists
-	 */
-	String getQueryParameterString();
+    /**
+     * @return decoded query parameters
+     */
+    Map<String, List<String>> getParameters();
 
-	/**
-	 * @return decoded query parameters
-	 */
-	Map<String, List<String>> getParameters();
+    Map<String, String> getHeaders();
 
-	Map<String, String> getHeaders();
-
-	/**
-	 * @return request body, null if the request does not have a payload
-	 */
-	InputStream getInputStream() throws IOException;
-
+    /**
+     * @return request body, null if the request does not have a payload
+     */
+    InputStream getInputStream() throws IOException;
 }

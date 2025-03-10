@@ -25,29 +25,31 @@ import java.util.List;
 import java.util.Set;
 
 public final class ProxyParameterWorkaround {
-	private ProxyParameterWorkaround() {}
+    private ProxyParameterWorkaround() {}
 
-	private static final Set<String> PROXY_PARAMETERS = new HashSet<>(Arrays.asList(
-			"--proxyHost", "--proxyPort", "--proxyUser", "--proxyPass"
-	));
+    private static final Set<String> PROXY_PARAMETERS = new HashSet<>(
+        Arrays.asList("--proxyHost", "--proxyPort", "--proxyUser", "--proxyPass")
+    );
 
-	public static void init() {
-		MainArgumentsTransformer.getArgumentsListeners().add(args -> {
-			boolean proxyDetected = false;
-			List<String> filtered = new ArrayList<>();
-			for (int i = 0; i < args.length; i++) {
-				if (i + 1 < args.length && PROXY_PARAMETERS.contains(args[i])) {
-					proxyDetected = true;
-					log(WARNING, "Dropping main argument " + args[i] + " " + args[i + 1]);
-					i++;
-					continue;
-				}
-				filtered.add(args[i]);
-			}
-			if (proxyDetected) {
-				log(WARNING, "--proxyHost parameter conflicts with authlib-injector, therefore proxy is disabled.");
-			}
-			return filtered.toArray(new String[filtered.size()]);
-		});
-	}
+    public static void init() {
+        MainArgumentsTransformer.getArgumentsListeners().add(args -> {
+            boolean proxyDetected = false;
+            List<String> filtered = new ArrayList<>();
+            for (int i = 0; i < args.length; i++) {
+                if (i + 1 < args.length && PROXY_PARAMETERS.contains(args[i])) {
+                    proxyDetected = true;
+                    log(WARNING, "Dropping main argument " + args[i] + " " + args[i + 1]);
+                    i++;
+                    continue;
+                }
+                filtered.add(args[i]);
+            }
+            if (proxyDetected) {
+                log(WARNING,
+                    "--proxyHost parameter conflicts with authlib-injector, therefore "
+                    + "proxy is disabled.");
+            }
+            return filtered.toArray(new String[filtered.size()]);
+        });
+    }
 }

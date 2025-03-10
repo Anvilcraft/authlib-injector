@@ -20,20 +20,18 @@ import static moe.yushi.authlibinjector.util.Logging.log;
 import static moe.yushi.authlibinjector.util.Logging.Level.INFO;
 
 public class AccountTypeTransformer {
-
-	public String[] transform(String[] args) {
-		boolean userTypeMatched = false;
-		for (int i = 0; i < args.length; i++) {
-			String arg = args[i];
-			if ("--userType".equals(arg)) {
-				userTypeMatched = true;
-			} else if (userTypeMatched && "mojang".equals(arg)) {
-				args[i] = "msa";
-				log(INFO, "Setting accountType to msa");
-				break;
-			}
-		}
-		return args;
-	}
-
+    public String[] transform(String[] args) {
+        boolean userTypeMatched = false;
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if ("--userType".equals(arg)) {
+                userTypeMatched = true;
+            } else if (userTypeMatched && "mojang".equals(arg)) {
+                args[i] = "msa";
+                log(INFO, "Setting accountType to msa");
+                break;
+            }
+        }
+        return args;
+    }
 }

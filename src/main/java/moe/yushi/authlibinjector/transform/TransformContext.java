@@ -22,18 +22,17 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
 
 public interface TransformContext {
-
-	String getClassName();
+    String getClassName();
 
     String getSuperName();
 
-	boolean isInterface();
+    boolean isInterface();
 
-	void markModified();
+    void markModified();
 
-	List<String> getStringConstants();
+    List<String> getStringConstants();
 
-	void invokeCallback(MethodVisitor mv, Class<?> owner, String methodName);
+    void invokeCallback(MethodVisitor mv, Class<?> owner, String methodName);
 
-	void addGeneratedMethod(String name, Consumer<ClassVisitor> generator);
+    void addGeneratedMethod(String name, Consumer<ClassVisitor> generator);
 }

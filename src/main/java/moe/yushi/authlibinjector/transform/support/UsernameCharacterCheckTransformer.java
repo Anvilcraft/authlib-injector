@@ -28,75 +28,99 @@ import moe.yushi.authlibinjector.transform.TransformUnit;
  * in the username. This transformer removes the restriction.
  */
 public class UsernameCharacterCheckTransformer implements TransformUnit {
+    @Override
+    public Optional<ClassVisitor> transform(
+        ClassLoader classLoader,
+        String className,
+        ClassVisitor writer,
+        TransformContext context
+    ) {
+        if (!context.getStringConstants().contains("Invalid characters in username")) {
+            return Optional.empty();
+        }
 
-	@Override
-	public Optional<ClassVisitor> transform(ClassLoader classLoader, String className, ClassVisitor writer, TransformContext context) {
-		if (!context.getStringConstants().contains("Invalid characters in username")) {
-			return Optional.empty();
-		}
+        return Optional.of(new ClassVisitor(ASM9, writer) {
+            @Override
+            public MethodVisitor visitMethod(
+                int access,
+                String name,
+                String descriptor,
+                String signature,
+                String[] exceptions
+            ) {
+                return new MethodVisitor(
+                    ASM9,
+                    super.visitMethod(access, name, descriptor, signature, exceptions)
+                ) {
+                    // States:
+                    // 0 - initial state
+                    // 1 - ldc_w "Invalid characters in username"
+                    // 2 - iconst_0
+                    // 3 - anewarray java/lang/Object
+                    // 4 - invokestatic
+                    // org/apache/commons/lang3/Validate.validState:(ZLjava/lang/String;[Ljava/lang/Object;)V
+                    int state = 0;
 
-		return Optional.of(new ClassVisitor(ASM9, writer) {
-			@Override
-			public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-				return new MethodVisitor(ASM9, super.visitMethod(access, name, descriptor, signature, exceptions)) {
+                    @Override
+                    public void visitLdcInsn(Object value) {
+                        if (state == 0
+                            && "Invalid characters in username".equals(value)) {
+                            state++;
+                        }
+                        super.visitLdcInsn(value);
+                    }
 
-					// States:
-					// 0 - initial state
-					// 1 - ldc_w "Invalid characters in username"
-					// 2 - iconst_0
-					// 3 - anewarray java/lang/Object
-					// 4 - invokestatic org/apache/commons/lang3/Validate.validState:(ZLjava/lang/String;[Ljava/lang/Object;)V
-					int state = 0;
+                    @Override
+                    public void visitInsn(int opcode) {
+                        if (state == 1 && opcode == ICONST_0) {
+                            state++;
+                        }
+                        super.visitInsn(opcode);
+                    }
 
-					@Override
-					public void visitLdcInsn(Object value) {
-						if (state == 0 && "Invalid characters in username".equals(value)) {
-							state++;
-						}
-						super.visitLdcInsn(value);
-					}
+                    @Override
+                    public void visitTypeInsn(int opcode, String type) {
+                        if (state == 2 && opcode == ANEWARRAY
+                            && "java/lang/Object".equals(type)) {
+                            state++;
+                        }
+                        super.visitTypeInsn(opcode, type);
+                    }
 
-					@Override
-					public void visitInsn(int opcode) {
-						if (state == 1 && opcode == ICONST_0) {
-							state++;
-						}
-						super.visitInsn(opcode);
-					}
+                    @Override
+                    public void visitMethodInsn(
+                        int opcode,
+                        String owner,
+                        String name,
+                        String descriptor,
+                        boolean isInterface
+                    ) {
+                        if (state == 3 && opcode == INVOKESTATIC
+                            && "org/apache/commons/lang3/Validate".equals(owner)
+                            && "validState".equals(name)
+                            && "(ZLjava/lang/String;[Ljava/lang/Object;)V".equals(
+                                descriptor
+                            )) {
+                            context.markModified();
+                            state++;
 
-					@Override
-					public void visitTypeInsn(int opcode, String type) {
-						if (state == 2 && opcode == ANEWARRAY && "java/lang/Object".equals(type)) {
-							state++;
-						}
-						super.visitTypeInsn(opcode, type);
-					}
+                            super.visitInsn(POP);
+                            super.visitInsn(POP);
+                            super.visitInsn(POP);
 
-					@Override
-					public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
-						if (state == 3 &&
-								opcode == INVOKESTATIC &&
-								"org/apache/commons/lang3/Validate".equals(owner) &&
-								"validState".equals(name) &&
-								"(ZLjava/lang/String;[Ljava/lang/Object;)V".equals(descriptor)) {
-							context.markModified();
-							state++;
+                        } else {
+                            super.visitMethodInsn(
+                                opcode, owner, name, descriptor, isInterface
+                            );
+                        }
+                    }
+                };
+            }
+        });
+    }
 
-							super.visitInsn(POP);
-							super.visitInsn(POP);
-							super.visitInsn(POP);
-
-						} else {
-							super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
-						}
-					}
-				};
-			}
-		});
-	}
-
-	@Override
-	public String toString() {
-		return "Username Character Check Transformer";
-	}
+    @Override
+    public String toString() {
+        return "Username Character Check Transformer";
+    }
 }

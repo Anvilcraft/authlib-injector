@@ -22,39 +22,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 public class SkinWhitelistTest {
+    @Test
+    public void testEmptyPattern() {
+        assertFalse(domainMatches("", "example.com"));
+    }
 
-	@Test
-	public void testEmptyPattern() {
-		assertFalse(domainMatches("", "example.com"));
-	}
+    @Test
+    public void testDotMatchesSubdomain() {
+        assertTrue(domainMatches(".example.com", "a.example.com"));
+    }
 
-	@Test
-	public void testDotMatchesSubdomain() {
-		assertTrue(domainMatches(".example.com", "a.example.com"));
-	}
+    @Test
+    public void testDotMatchesSubdomain2() {
+        assertTrue(domainMatches(".example.com", "b.a.example.com"));
+    }
 
-	@Test
-	public void testDotMatchesSubdomain2() {
-		assertTrue(domainMatches(".example.com", "b.a.example.com"));
-	}
+    @Test
+    public void testDotNotMatchesToplevel() {
+        assertFalse(domainMatches(".example.com", "example.com"));
+    }
 
-	@Test
-	public void testDotNotMatchesToplevel() {
-		assertFalse(domainMatches(".example.com", "example.com"));
-	}
+    @Test
+    public void testNonDotMatchesToplevel() {
+        assertTrue(domainMatches("example.com", "example.com"));
+    }
 
-	@Test
-	public void testNonDotMatchesToplevel() {
-		assertTrue(domainMatches("example.com", "example.com"));
-	}
+    @Test
+    public void testNonDotNotMatchesSubdomain() {
+        assertFalse(domainMatches("example.com", "a.example.com"));
+    }
 
-	@Test
-	public void testNonDotNotMatchesSubdomain() {
-		assertFalse(domainMatches("example.com", "a.example.com"));
-	}
-
-	@Test
-	public void testNonDotNotMatchesOther() {
-		assertFalse(domainMatches("example.com", "eexample.com"));
-	}
+    @Test
+    public void testNonDotNotMatchesOther() {
+        assertFalse(domainMatches("example.com", "eexample.com"));
+    }
 }

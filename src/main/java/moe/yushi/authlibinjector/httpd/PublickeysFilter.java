@@ -29,34 +29,37 @@ import moe.yushi.authlibinjector.internal.org.json.simple.JSONObject;
 import moe.yushi.authlibinjector.transform.support.YggdrasilKeyTransformUnit;
 
 public class PublickeysFilter implements URLFilter {
+    @Override
+    public boolean canHandle(String domain) {
+        return domain.equals("api.minecraftservices.com");
+    }
 
-	@Override
-	public boolean canHandle(String domain) {
-		return domain.equals("api.minecraftservices.com");
-	}
+    @Override
+    public Optional<Response> handle(String domain, String path, IHTTPSession session)
+        throws IOException {
+        if (domain.equals("api.minecraftservices.com") && path.equals("/publickeys")
+            && session.getMethod().equals("GET")) {
+            return Optional.of(Response.newFixedLength(
+                Status.OK, CONTENT_TYPE_JSON, makePublickeysResponse().toJSONString()
+            ));
+        }
+        return Optional.empty();
+    }
 
-	@Override
-	public Optional<Response> handle(String domain, String path, IHTTPSession session) throws IOException {
-		if (domain.equals("api.minecraftservices.com") && path.equals("/publickeys") && session.getMethod().equals("GET")) {
-			return Optional.of(Response.newFixedLength(Status.OK, CONTENT_TYPE_JSON, makePublickeysResponse().toJSONString()));
-		}
-		return Optional.empty();
-	}
+    private JSONObject makePublickeysResponse() {
+        JSONObject response = new JSONObject();
+        JSONArray profilePropertyKeys = new JSONArray();
+        JSONArray playerCertificateKeys = new JSONArray();
 
-	private JSONObject makePublickeysResponse() {
-		JSONObject response = new JSONObject();
-		JSONArray profilePropertyKeys = new JSONArray();
-		JSONArray playerCertificateKeys = new JSONArray();
+        for (PublicKey key : YggdrasilKeyTransformUnit.PUBLIC_KEYS) {
+            JSONObject entry = new JSONObject();
+            entry.put("publicKey", Base64.getEncoder().encodeToString(key.getEncoded()));
+            profilePropertyKeys.add(entry);
+            playerCertificateKeys.add(entry);
+        }
 
-		for (PublicKey key : YggdrasilKeyTransformUnit.PUBLIC_KEYS) {
-			JSONObject entry = new JSONObject();
-			entry.put("publicKey", Base64.getEncoder().encodeToString(key.getEncoded()));
-			profilePropertyKeys.add(entry);
-			playerCertificateKeys.add(entry);
-		}
-
-		response.put("profilePropertyKeys", profilePropertyKeys);
-		response.put("playerCertificateKeys", playerCertificateKeys);
-		return response;
-	}
+        response.put("profilePropertyKeys", profilePropertyKeys);
+        response.put("playerCertificateKeys", playerCertificateKeys);
+        return response;
+    }
 }

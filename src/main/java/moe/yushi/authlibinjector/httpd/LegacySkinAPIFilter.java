@@ -43,75 +43,98 @@ import moe.yushi.authlibinjector.util.JsonUtils;
 import moe.yushi.authlibinjector.yggdrasil.YggdrasilClient;
 
 public class LegacySkinAPIFilter implements URLFilter {
+    private static final Pattern PATH_SKINS
+        = Pattern.compile("^/MinecraftSkins/(?<username>[^/]+)\\.png$");
 
-	private static final Pattern PATH_SKINS = Pattern.compile("^/MinecraftSkins/(?<username>[^/]+)\\.png$");
+    private YggdrasilClient upstream;
 
-	private YggdrasilClient upstream;
+    public LegacySkinAPIFilter(YggdrasilClient upstream) {
+        this.upstream = upstream;
+    }
 
-	public LegacySkinAPIFilter(YggdrasilClient upstream) {
-		this.upstream = upstream;
-	}
+    @Override
+    public boolean canHandle(String domain) {
+        return domain.equals("skins.minecraft.net");
+    }
 
-	@Override
-	public boolean canHandle(String domain) {
-		return domain.equals("skins.minecraft.net");
-	}
+    @Override
+    public Optional<Response> handle(String domain, String path, IHTTPSession session) {
+        if (!domain.equals("skins.minecraft.net"))
+            return empty();
+        Matcher matcher = PATH_SKINS.matcher(path);
+        if (!matcher.find())
+            return empty();
+        String username = matcher.group("username");
 
-	@Override
-	public Optional<Response> handle(String domain, String path, IHTTPSession session) {
-		if (!domain.equals("skins.minecraft.net"))
-			return empty();
-		Matcher matcher = PATH_SKINS.matcher(path);
-		if (!matcher.find())
-			return empty();
-		String username = matcher.group("username");
+        // Minecraft does not encode non-ASCII characters in URLs
+        // We have to workaround this problem
+        username = correctEncoding(username);
 
-		// Minecraft does not encode non-ASCII characters in URLs
-		// We have to workaround this problem
-		username = correctEncoding(username);
+        Optional<String> skinUrl;
+        try {
+            skinUrl
+                = upstream.queryUUID(username)
+                      .flatMap(uuid -> upstream.queryProfile(uuid, false))
+                      .flatMap(
+                          profile
+                          -> Optional.ofNullable(profile.properties.get("textures"))
+                      )
+                      .map(
+                          property -> asString(Base64.getDecoder().decode(property.value))
+                      )
+                      .flatMap(
+                          texturesPayload -> obtainTextureUrl(texturesPayload, "SKIN")
+                      );
+        } catch (UncheckedIOException e) {
+            throw newUncheckedIOException(
+                "Failed to fetch skin metadata for " + username, e
+            );
+        }
 
-		Optional<String> skinUrl;
-		try {
-			skinUrl = upstream.queryUUID(username)
-					.flatMap(uuid -> upstream.queryProfile(uuid, false))
-					.flatMap(profile -> Optional.ofNullable(profile.properties.get("textures")))
-					.map(property -> asString(Base64.getDecoder().decode(property.value)))
-					.flatMap(texturesPayload -> obtainTextureUrl(texturesPayload, "SKIN"));
-		} catch (UncheckedIOException e) {
-			throw newUncheckedIOException("Failed to fetch skin metadata for " + username, e);
-		}
+        if (skinUrl.isPresent()) {
+            String url = skinUrl.get();
+            log(DEBUG, "Retrieving skin for " + username + " from " + url);
+            byte[] data;
+            try {
+                data = http("GET", url);
+            } catch (IOException e) {
+                throw newUncheckedIOException("Failed to retrieve skin from " + url, e);
+            }
+            log(INFO,
+                "Retrieved skin for " + username + " from " + url + ", " + data.length
+                    + " bytes");
+            return of(Response.newFixedLength(
+                Status.OK, "image/png", new ByteArrayInputStream(data), data.length
+            ));
 
-		if (skinUrl.isPresent()) {
-			String url = skinUrl.get();
-			log(DEBUG, "Retrieving skin for " + username + " from " + url);
-			byte[] data;
-			try {
-				data = http("GET", url);
-			} catch (IOException e) {
-				throw newUncheckedIOException("Failed to retrieve skin from " + url, e);
-			}
-			log(INFO, "Retrieved skin for " + username + " from " + url + ", " + data.length + " bytes");
-			return of(Response.newFixedLength(Status.OK, "image/png", new ByteArrayInputStream(data), data.length));
+        } else {
+            log(INFO, "No skin is found for " + username);
+            return of(Response.newFixedLength(Status.NOT_FOUND, null, null));
+        }
+    }
 
-		} else {
-			log(INFO, "No skin is found for " + username);
-			return of(Response.newFixedLength(Status.NOT_FOUND, null, null));
-		}
-	}
+    private Optional<String> obtainTextureUrl(String texturesPayload, String textureType)
+        throws UncheckedIOException {
+        JSONObject payload = asJsonObject(parseJson(texturesPayload));
+        JSONObject textures = asJsonObject(payload.get("textures"));
 
-	private Optional<String> obtainTextureUrl(String texturesPayload, String textureType) throws UncheckedIOException {
-		JSONObject payload = asJsonObject(parseJson(texturesPayload));
-		JSONObject textures = asJsonObject(payload.get("textures"));
+        return ofNullable(textures.get(textureType))
+            .map(JsonUtils::asJsonObject)
+            .map(
+                it
+                -> ofNullable(it.get("url"))
+                       .map(JsonUtils::asJsonString)
+                       .orElseThrow(
+                           ()
+                               -> newUncheckedIOException(
+                                   "Invalid JSON: Missing texture url"
+                               )
+                       )
+            );
+    }
 
-		return ofNullable(textures.get(textureType))
-				.map(JsonUtils::asJsonObject)
-				.map(it -> ofNullable(it.get("url"))
-						.map(JsonUtils::asJsonString)
-						.orElseThrow(() -> newUncheckedIOException("Invalid JSON: Missing texture url")));
-	}
-
-	private static String correctEncoding(String grable) {
-		// platform charset is used
-		return new String(grable.getBytes(ISO_8859_1));
-	}
+    private static String correctEncoding(String grable) {
+        // platform charset is used
+        return new String(grable.getBytes(ISO_8859_1));
+    }
 }

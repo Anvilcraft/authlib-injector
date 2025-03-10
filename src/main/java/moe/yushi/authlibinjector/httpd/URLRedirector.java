@@ -23,5 +23,5 @@ import java.util.Optional;
  * and points them to the customized authentication server.
  */
 public interface URLRedirector {
-	Optional<String> redirect(String domain, String path);
+    Optional<String> redirect(String domain, String path);
 }
